@@ -192,10 +192,22 @@ def _fetch(pages):
             raise item
         return _Resp(item)
 
+    conf = {"socradar_company_id": "1", "socradar_api_key": "k",
+            # Pin the window instead of deriving it from the lookback. The
+            # derived value is "ten hours ago", which lands on today's date
+            # after 10:00 UTC and on yesterday's before it, so an assertion
+            # written against it passes or fails by the clock rather than by
+            # the behaviour it means to describe.
+            "initial_start_date": WINDOW_START}
     with mock.patch("sources.base_fetcher.requests.get", side_effect=get), \
          mock.patch("sources.base_fetcher.time.sleep"):
-        records = _Fetcher().fetch({"socradar_company_id": "1", "socradar_api_key": "k"}, {})
+        records = _Fetcher().fetch(conf, {})
     return calls["n"], records
+
+
+# The window every _fetch call starts from. Fixed, so "did the window move?"
+# is answered by comparing against it rather than against the current date.
+WINDOW_START = "2026-01-15"
 
 
 def _today():
@@ -230,7 +242,10 @@ class APageThatArrivesEmptyTooEarly(unittest.TestCase):
     def test_the_window_is_held_rather_than_skipped(self):
         _, records = _fetch([_page(100, 500), _page(0, 500)])
         checkpoint = records[-1]["_checkpoint_update"]
-        self.assertNotEqual(checkpoint["last_start_date"], _today())
+        # Held means the window is exactly where it started, not merely
+        # "some date that is not today".
+        self.assertEqual(checkpoint["last_start_date"], WINDOW_START,
+                         "the window moved even though a page was never read")
         self.assertEqual(checkpoint["last_page"], 1, "the empty page must be re-read")
 
     def test_it_is_reported_as_a_failure(self):

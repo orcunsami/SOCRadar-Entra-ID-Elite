@@ -17,7 +17,9 @@ company is only ever searched in its own tenants.
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Forcunsami%2FSOCRadar-Entra-ID-Elite%2Fmaster%2Fdeploy%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Forcunsami%2FSOCRadar-Entra-ID-Elite%2Fmaster%2Fdeploy%2FcreateUiDefinition.json)
 
 Runs as an Azure Function App. Syncing starts right after deployment;
-for a read-only trial turn off Apply changes in the form (plan-only mode).
+for a read-only trial turn off Apply changes in the form (plan-only mode). That
+covers the scheduled sync; `POST /api/former/manual` is a deliberate operator
+override and writes whatever it is given, in either mode.
 
 ## Deploy
 
@@ -66,9 +68,11 @@ Manual entries survive reconciles until removed with `action: remove`.
 ## Safety model
 
 - Plan-only trial available with a single switch (Apply changes off).
-- Only records this integration created (readback-confirmed ownership
-  ledger) are ever removal candidates; records added in the platform UI
-  or by other tools are never touched.
+- The scheduled reconcile only ever considers records this integration
+  created (readback-confirmed ownership ledger) for removal; records added
+  in the platform UI or by other tools are never touched by it. The manual
+  endpoint is the exception and removes exactly the addresses you name,
+  ownership or not.
 - An incomplete tenant snapshot, the first run, and per-run caps all
   withhold deletions.
 - A data-completeness guard blocks mutation when a tenant read shrinks

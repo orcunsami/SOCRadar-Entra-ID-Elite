@@ -9,7 +9,7 @@
         "type": "Microsoft.Common.TextBlock",
         "visible": true,
         "options": {
-          "text": "This solution suppresses false-positive leak alarms for former employees. One deployment manages every company in your corporate group: each company's group tenants are derived automatically from the other rows. Former-employee sync starts working on the first run: it writes to your SOCRadar former-employee list, and to nothing else. Clear the apply box on the next page if you would rather watch it first. Leak monitoring — the part that can act on accounts — stays off until you turn it on. This template deploys the infrastructure; the function code package is published in a follow-up step (see the README)."
+          "text": "This solution suppresses false-positive leak alarms for former employees. One deployment manages every company in your corporate group: each company's group tenants are derived automatically from the other rows. Former-employee sync starts working on the first run: it writes to your SOCRadar former-employee list, and to nothing else. Clear the apply box on the next page if you would rather watch it first. Leak monitoring — the part that can act on accounts — stays off until you turn it on."
         }
       }
     ],
@@ -506,7 +506,7 @@
             "type": "Microsoft.Common.TextBlock",
             "visible": "[and(steps('leak').enableLeak, equals(steps('leak').response, 'respond'))]",
             "options": {
-              "text": "Three of these cannot be undone: signing the user out, requiring a password change, and resetting MFA registration. A reset wipes the registered methods and the person has to enrol again. Disabling an account can be reversed, and a compromise mark can be dismissed in Identity Protection. Responding also needs write permission in every tenant you listed, so each tenant's admin consents once. Start with Log only if you want to see the matches first."
+              "text": "One of these cannot be undone: resetting MFA registration wipes the person's registered methods and they have to enrol again. A reset wipes the registered methods and the person has to enrol again. Disabling an account can be reversed, and a compromise mark can be dismissed in Identity Protection. Responding also needs write permission in every tenant you listed, so each tenant's admin consents once. Start with Log only if you want to see the matches first."
             }
           }
         ]
