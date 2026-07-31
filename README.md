@@ -174,10 +174,15 @@ keep a row per person per response for the life of the deployment.
 
 Four ways to check, from quickest to most independent.
 
-**1. Ask the app.** `GET /api/leak/preview?code=<function-key>` returns which
-companies are configured, which of their tenants it can actually reach, and
-which responses are armed. `ready: false` on a company means it is not set up
-yet — look at `tenants_unreachable`.
+**1. Ask the app.** `GET /api/former/preview?code=<function-key>` returns, per
+company, whether every tenant was read (`snapshot_complete`) and who would be
+added or removed. A `false` there is the signal that something is missing, most
+often the federated credential.
+
+`GET /api/leak/preview?code=<function-key>` adds which tenants leak monitoring
+can reach and which responses are armed. It reports no reachable tenant while
+leak monitoring is off, so read it as a leak-side check only, not as a verdict
+on the install.
 
 **2. Ask about one person.** `POST /api/leak/probe` with an address and a
 company ID says where that person was found and what would happen to them.

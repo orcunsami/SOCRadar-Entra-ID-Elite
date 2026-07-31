@@ -698,7 +698,7 @@ output ficNote string = CreateAppRegistration
       ? 'FIC skipped — add it manually for the UAMI principal.'
       : (addFicToExistingApp.properties.outputs.ficAdded
           ? 'FIC is in place on the existing App Registration.'
-          : 'CHECK THIS — the deployment could not add the federated credential, and without Entra read permission it also cannot tell whether a suitable one already exists. Confirm with GET /api/leak/preview: if tenants_reachable is empty the credential is missing, and an owner of the App Registration must run the command in ficManualCommand. Until then no user is looked up or acted on.'))
+          : 'CHECK THIS — the deployment could not add the federated credential, and without Entra read permission it also cannot tell whether a suitable one already exists. Confirm with GET /api/former/preview: if snapshot_complete is false the credential is missing, and an owner of the App Registration must run the command in ficManualCommand. Do not use leak/preview for this: it reports no reachable tenant whenever leak monitoring is off, which is the default. Until then no user is looked up or acted on.'))
 
 // Built here rather than inside the script: the command carries quotes and the
 // script's output file has to survive bicep, ARM and shell quoting in turn.

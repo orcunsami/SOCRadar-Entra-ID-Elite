@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.45.15.27210",
-      "templateHash": "9920855394075284900"
+      "templateHash": "2348387919153894716"
     }
   },
   "parameters": {
@@ -1269,7 +1269,7 @@
     },
     "ficNote": {
       "type": "string",
-      "value": "[if(parameters('CreateAppRegistration'), 'FIC created automatically.', if(parameters('SkipFicCreation'), 'FIC skipped — add it manually for the UAMI principal.', if(reference('addFicToExistingApp').outputs.ficAdded, 'FIC is in place on the existing App Registration.', 'CHECK THIS — the deployment could not add the federated credential, and without Entra read permission it also cannot tell whether a suitable one already exists. Confirm with GET /api/leak/preview: if tenants_reachable is empty the credential is missing, and an owner of the App Registration must run the command in ficManualCommand. Until then no user is looked up or acted on.')))]"
+      "value": "[if(parameters('CreateAppRegistration'), 'FIC created automatically.', if(parameters('SkipFicCreation'), 'FIC skipped — add it manually for the UAMI principal.', if(reference('addFicToExistingApp').outputs.ficAdded, 'FIC is in place on the existing App Registration.', 'CHECK THIS — the deployment could not add the federated credential, and without Entra read permission it also cannot tell whether a suitable one already exists. Confirm with GET /api/former/preview: if snapshot_complete is false the credential is missing, and an owner of the App Registration must run the command in ficManualCommand. Do not use leak/preview for this: it reports no reachable tenant whenever leak monitoring is off, which is the default. Until then no user is looked up or acted on.')))]"
     },
     "ficManualCommand": {
       "type": "string",
