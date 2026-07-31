@@ -135,7 +135,10 @@ Safety works the same way as the former sync:
   Matches keep being recorded. The ceiling covers the schedule; a manual
   `/api/leak/probe` call acts once, on one address, and is not counted against it.
 - **Only the responses you pick are requested as permissions.** Leave an action
-  unselected and its write permission is never asked for and never runs.
+  unselected and its write permission is never asked for and never runs. Adding
+  people to a group is not in that list: it is not a checkbox but a consequence
+  of filling in **Security group object ID**. Fill it in and group write
+  permission is requested; leave it empty and it is not.
 - A failed feed read or a failed lookup is reported as an error, not as a clean
   run with no findings, and the window is read again rather than skipped. After
   a few failed attempts the run moves on and records that it did.
@@ -149,6 +152,16 @@ Safety works the same way as the former sync:
 | Disable the account | Re-enable it in Entra ID: the user's profile, **Account enabled** |
 | Reset MFA registration | **Cannot be undone.** The user must register their methods again |
 | Confirm compromised | Dismiss the risk in Entra ID Protection: **Risky users**, select the user, **Dismiss user risk** |
+| Add to a security group | Remove the member in Entra ID: the group's **Members** list. Whatever that group grants or restricts applies until you do |
+| Remove from a security group | Add the member back in the same place |
+| Re-enable the account | Disable it again in the user's profile, **Account enabled** |
+
+The last three are not checkboxes on the form. Adding people to a group is
+turned on by filling in **Security group object ID** and nothing else, so a
+deployment that responds at all and names a group is also changing group
+membership — leave the field empty if that is not what you want. Removing from
+the group and re-enabling accounts stay off unless `ENABLE_REMOVE_FROM_GROUP`
+or `ENABLE_ENABLE_ACCOUNT` is set in the app's settings.
 
 Confirming a user as compromised needs Entra ID P1 or P2. Without that licence
 the response is attempted, recorded as `confirm_risky_failed` and retried on a

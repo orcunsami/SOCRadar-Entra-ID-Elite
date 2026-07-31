@@ -56,13 +56,19 @@ rm -f params.json
 ```
 
 Leave `EntraIdClientId` empty to create a new App Registration with
-User.Read.All — the FIC to the managed identity is
-created automatically on this path. When reusing an existing App
-Registration the deployment script can only add the FIC if the deployer
-identity may write to that app; otherwise the deployment still succeeds
-and the script output prints the exact `az ad app federated-credential
-create` command to run as an app owner. Consent the multi-tenant app once
-in every sibling tenant.
+User.Read.All — the FIC to the managed identity is created automatically on
+this path.
+
+When reusing an existing App Registration, plan on adding the FIC yourself.
+The script that would add it runs as the managed identity this deployment
+just created, and that identity holds no Entra permission at all, so it
+cannot write to an App Registration it does not own. Your own rights do not
+change that: a Global Administrator gets the same result. The deployment
+still reports success and prints the exact `az ad app federated-credential
+create` command — run it as an owner of the app. Until it exists the app
+gets no Graph token and looks nobody up. Confirm with `GET
+/api/former/preview`. Consent the multi-tenant app once in every sibling
+tenant.
 
 `PackageUri` points at the FunctionApp zip release; empty deploys the
 infrastructure only.

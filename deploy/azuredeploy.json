@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.45.15.27210",
-      "templateHash": "15001574052704254406"
+      "templateHash": "12318933821827934356"
     }
   },
   "parameters": {
@@ -1269,7 +1269,7 @@
     },
     "consentNote": {
       "type": "string",
-      "value": "[if(and(parameters('CreateAppRegistration'), not(parameters('GrantAdminConsent'))), 'Grant admin consent to the new App Registration (Entra portal > App registrations > Entra ID Elite > API permissions), and consent it in every sibling tenant.', 'Consent handled (existing app or automated grant). Sibling tenants still need the multi-tenant app consented once each.')]"
+      "value": "[if(parameters('CreateAppRegistration'), if(parameters('GrantAdminConsent'), 'Consent granted by the deployment. Each sibling tenant still needs the multi-tenant app consented once.', 'Grant admin consent to the new App Registration (Entra portal > App registrations > Entra ID Elite > API permissions), and consent it in every sibling tenant.'), 'Not checked here: the deployment cannot read the permissions of an App Registration it does not own. Confirm the reused app still has its Graph permissions granted, and that each sibling tenant has consented to the multi-tenant app once.')]"
     },
     "ficNote": {
       "type": "string",

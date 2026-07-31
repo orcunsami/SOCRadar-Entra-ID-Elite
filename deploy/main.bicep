@@ -689,7 +689,15 @@ output functionAppName string = functionAppName
 output previewUrl string = 'https://${functionAppName}.azurewebsites.net/api/former/preview?code=<function-key>'
 output entraClientId string = resolvedAppClientId
 output workspaceName string = workspaceName
-output consentNote string = CreateAppRegistration && !GrantAdminConsent ? 'Grant admin consent to the new App Registration (Entra portal > App registrations > Entra ID Elite > API permissions), and consent it in every sibling tenant.' : 'Consent handled (existing app or automated grant). Sibling tenants still need the multi-tenant app consented once each.'
+// 'Consent handled' was a guess dressed as a fact on the reuse path: this
+// deployment cannot read an App Registration it does not own, so it has no way
+// to know whether the permissions are still granted. Same failure shape as the
+// FIC note below — an install that reads as finished and looks nobody up.
+output consentNote string = CreateAppRegistration
+  ? (GrantAdminConsent
+      ? 'Consent granted by the deployment. Each sibling tenant still needs the multi-tenant app consented once.'
+      : 'Grant admin consent to the new App Registration (Entra portal > App registrations > Entra ID Elite > API permissions), and consent it in every sibling tenant.')
+  : 'Not checked here: the deployment cannot read the permissions of an App Registration it does not own. Confirm the reused app still has its Graph permissions granted, and that each sibling tenant has consented to the multi-tenant app once.'
 // Reports what the script achieved, not what it attempted. Claiming the
 // federated credential is in place when it is not leaves an install that looks
 // healthy and silently skips every directory lookup.
