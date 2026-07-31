@@ -303,17 +303,25 @@ else
   [ "$STATE" = "healthy" ] && pass "former/preview reports a complete snapshot" \
                            || fail "former/preview never became healthy: $STATE"
 
-  PREVIEW=$(curl -s -H "x-functions-key: $KEY" \
-    "https://$APP.azurewebsites.net/api/leak/preview?company_id=$GATE_COMPANY_ID" || echo '{}')
-  python3 - "$PREVIEW" <<'PY' && pass "leak/preview reports a reachable tenant" || fail "leak/preview: no tenant reachable (the app cannot get a Graph token)"
+  # Polled for the same reason former/preview is: these are two different token
+  # paths, and the leak one has been seen to lag behind a credential the former
+  # one already accepts. Asking once turned that lag into a release failure.
+  REACHABLE=1
+  for _ in $(seq 1 8); do
+    PREVIEW=$(curl -s -H "x-functions-key: $KEY" \
+      "https://$APP.azurewebsites.net/api/leak/preview?company_id=$GATE_COMPANY_ID" || echo '{}')
+    if printf '%s' "$PREVIEW" | python3 -c '
 import json, sys
 try:
-    d = json.loads(sys.argv[1])
+    d = json.load(sys.stdin)
 except Exception:
     sys.exit(1)
-companies = d.get("companies") or []
-sys.exit(0 if any(c.get("tenants_reachable") for c in companies) else 1)
-PY
+sys.exit(0 if any(c.get("tenants_reachable") for c in (d.get("companies") or [])) else 1)
+'; then REACHABLE=0; break; fi
+    sleep 15
+  done
+  [ "$REACHABLE" = "0" ] && pass "leak/preview reports a reachable tenant" \
+    || fail "leak/preview: no tenant reachable after 2 minutes (the app cannot get a Graph token)"
 fi
 
 step "Result"
