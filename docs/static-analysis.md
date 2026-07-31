@@ -1,102 +1,108 @@
-# Statik analiz: ne kapı, ne değil
+# Static analysis: what it gates, what it does not
 
-**Ölçüm tarihi: 29 Temmuz 2026.** Yöntem: ruff ve mypy bu repo üzerinde
-koşturuldu, sonra ikisi de **bu projede bulunmuş kusurlara** karşı
-sınandı. Sınama kanıt zorunluydu: kusur repo kopyasında geri alındı, araç
-koşturuldu, bulgu çıkıyor mu bakıldı.
+**Measurement date: 29 July 2026.** Method: ruff and mypy were run over this
+repo, then both were tested against **defects actually found in this project**.
+The test required evidence: the defect was reverted in a copy of the repo, the
+tool was run, and the finding was checked for.
 
-Neden bu soru: testler yeşilken gerçek kusurlar durabiliyordu ve testle değil kod
-okunarak bulunuyordu. Yani "bulgu üretiyor"
-bir aracı kapı yapmak için gerekçe değil. Soru şu: **okumanın bulduğunu
-yakalıyor mu?**
+Why this question: real defects could sit there while the tests were green, and
+they were found by reading the code, not by testing. So "it produces findings"
+is not a reason to make a tool a gate. The question is: **does it catch what
+reading found?**
 
-## Sonuç tablosu
+## Result table
 
-| Araç | Bulgu | kusurlardan yakaladığı | Karar |
+| Tool | Findings | Caught of those defects | Verdict |
 |---|---|---|---|
-| ruff 0.16 | 164 (varsayılan) · 2 753 (`--select ALL`) · 2 984 (`ALL --preview`) | **0** | CI kapısı DEĞİL |
-| mypy 2.3 | 34 (varsayılan) · 255 (`--strict`) | **0** | CI kapısı DEĞİL |
-| coverage | üretim kodu %59 | — | **Taban olarak CI'da** |
+| ruff 0.16 | 164 (default) · 2 753 (`--select ALL`) · 2 984 (`ALL --preview`) | **0** | NOT a CI gate |
+| mypy 2.3 | 34 (default) · 255 (`--strict`) | **0** | NOT a CI gate |
+| coverage | 59% of production code | — | **In CI as a floor** |
 
-`--select ALL --preview` her seçimin üst kümesi olduğu için ruff kararı
-yapılandırma seçimine bağlı değil. mypy tarafında her mutasyon ayrı dizinde,
-`--no-incremental --cache-dir /dev/null` ile, `(dosya, mesaj)` çoklu kümesi
-karşılaştırılarak sınandı; satır kaymaları ne bulgu uydurabilir ne maskeleyebilir.
+`--select ALL --preview` is a superset of every selection, so the ruff verdict
+does not depend on the configuration chosen. On the mypy side each mutation was
+tested in its own directory, with `--no-incremental --cache-dir /dev/null`,
+comparing the `(file, message)` multiset; line shifts can neither invent a
+finding nor mask one.
 
-Neden: kusurların çoğu **eksik mantıktı** — var olmayan bir satır, yanlış
-sıralanmış iki kapı, bildirilmemiş bir şema kolonu. Statik analiz var olan kodu
-inceler; olmayan kodu inceleyemez. Bir kusur (ARM çıktısının yalanı) bicep ve
-shell içinde, Python aracının görüş alanında değil.
+Why: most of the defects were **missing logic** — a line that does not exist,
+two gates in the wrong order, an undeclared schema column. Static analysis
+inspects the code that is there; it cannot inspect code that is not. One defect
+(the ARM output's lie) lives in bicep and shell, outside a Python tool's field
+of view.
 
-## Yine de değer üretti: tek seferlik koşum 3 gerçek bulgu verdi
+## It paid off anyway: a one-off run gave 3 real findings
 
-Kapı olmaması "işe yaramaz" demek değil. Aynı koşum, o kusurların dışında üç
-gerçek sorun gösterdi:
+Not being a gate does not mean "useless". The same run showed three real
+problems beyond those defects:
 
-| Bulgu | Yer | Durum |
+| Finding | Where | Status |
 |---|---|---|
-| `date.today()` naive, kod tabanının UTC konvansiyonunu kırıyor | `actions/action_ledger.py:53` | ✅ düzeltildi |
-| `except Exception: pass` bir yaşam-döngüsü olayını yutuyor (kendi yorumu "alertable olmalı" diyor) | `function_app.py:1069` | ✅ düzeltildi |
-| `except Exception: pass` başarısız şirketin audit satırını yutuyor | `function_app.py:1213` | ✅ düzeltildi |
+| `date.today()` is naive, breaking the code base's UTC convention | `actions/action_ledger.py:53` | ✅ fixed |
+| `except Exception: pass` swallows a lifecycle event (its own comment says it "should be alertable") | `function_app.py:1069` | ✅ fixed |
+| `except Exception: pass` swallows the audit row of a failed company | `function_app.py:1213` | ✅ fixed |
 
-Bu yüzden karar "kullanmayın" değil: **sürüm öncesi elle koş, kapı yapma.**
+So the verdict is not "do not use them": **run them by hand before a release,
+do not make them a gate.**
 
 ```bash
 python3 -m venv /tmp/ruff && /tmp/ruff/bin/pip install -q ruff
 /tmp/ruff/bin/ruff check FunctionApp --output-format=concise
 ```
 
-Çıkan 164 bulgunun ~160'ı stil ya da yanlış pozitif. İşe yarayan kısım
-`S110` (sessiz `except`) ve `DTZ` (naive tarih) aileleri; bu ikisi bu projenin
-belgelenmiş kusur sınıfına doğrudan
-denk geliyor. Gözle taranırken bunlara bak, gerisini geç.
+About 160 of the 164 findings are style or false positives. The useful part is
+the `S110` (silent `except`) and `DTZ` (naive date) families; those two map
+directly onto this project's documented defect class. When scanning by eye,
+look at those and skip the rest.
 
-## Kapanan kalem: naive tarih (ve yanında bulunan gerçek bug)
+## A closed item: naive date (and the real bug found next to it)
 
-`cutoff_date` varsayılanda `date.today()` kullanıyordu; kod tabanındaki **tek**
-naive tarih çağrısıydı. Düzeltildi: `datetime.now(timezone.utc).date()`.
+`cutoff_date` used `date.today()` by default; it was the **only** naive date
+call in the code base. Fixed: `datetime.now(timezone.utc).date()`.
 
-Etkisi bugün latent olurdu (`WEBSITE_TIME_ZONE` hiçbir yerde ayarlı değil, Azure
-Functions Linux worker varsayılanı UTC). Ama düzeltirken aynı fonksiyonda **şu
-an ulaşılabilir** bir bug çıktı:
+The impact would be latent today (`WEBSITE_TIME_ZONE` is not set anywhere, and
+the Azure Functions Linux worker defaults to UTC). But while fixing it, a
+**currently reachable** bug turned up in the same function:
 
-`MIN_RETENTION_DAYS = 30`'un gerekçesini "en büyük süregelen pencere 24 saat"
-diye yazmıştım. Yanlış. `LeakInitialLookbackDays` formda açık ve 365'e kadar
-seçilebiliyor. 365 seçen bir müşterinin ilk koşusu satırlarını bir yıl geriye
-damgalar, 90 günlük cutoff onları siler ve **o koşunun kendi idempotency
-kayıtları** yok olur. En büyük batch'te aynı kişiye ikinci kez aksiyon.
+I had written the rationale for `MIN_RETENTION_DAYS = 30` as "the largest
+ongoing window is 24 hours". Wrong. `LeakInitialLookbackDays` is on the form and
+can be set as high as 365. For a customer who picks 365, the first run stamps
+its rows a year back, the 90-day cutoff deletes them, and **that run's own
+idempotency records** disappear. A second action on the same person, in the
+largest batch.
 
-Düzeltme: cutoff işlenen pencereye asla ulaşmıyor, `min(cutoff, active_window)`.
-Her iki çağrı yeri aktif pencereyi geçiriyor.
+Fix: the cutoff never reaches into the window being processed,
+`min(cutoff, active_window)`. Both call sites pass the active window.
 
-Gerçek Azure Table'da doğrulandı (11 kontrol), içinde kusuru yeniden üreten bir
-adımla: clamp'siz cutoff aktif pencerenin kaydını **gerçekten** siliyor.
+Verified against a real Azure Table (11 checks), with a step in it that
+reproduces the defect: without the clamp, the cutoff **really does** delete the
+active window's record.
 
-Konvansiyon artık kilitli: `tests/test_utc_convention.py` AST ile tüm ağacı
-tarar (`FunctionApp/` + `scripts/`), `date.today()` · `datetime.date.today()` ·
-aliaslı import · `utcnow` · `fromtimestamp` · `utcfromtimestamp` varyantlarını
-ayrı ayrı yakalar. Literal grep bunların çoğunu kaçırırdı.
+The convention is locked now: `tests/test_utc_convention.py` walks the whole
+tree via AST (`FunctionApp/` + `scripts/`) and catches the `date.today()` ·
+`datetime.date.today()` · aliased import · `utcnow` · `fromtimestamp` ·
+`utcfromtimestamp` variants separately. A literal grep would miss most of them.
 
-## Kapsam eşiği neden 63
+## Why the coverage threshold is 63
 
-`--omit='tests/*'` ile ölçülen üretim kodu değeri. Testler sayıldığında rakam
-şişiyor, çünkü test dosyaları tanımı gereği neredeyse tamamen koşuyor — o
-sayıyla bir taban koymak, test yazınca yükselen ama tek satır uygulama kodu
-kapsamayan bir gösterge üretirdi.
+It is the production-code figure measured with `--omit='tests/*'`. Counting the
+tests inflates the number, because test files by definition run almost entirely
+— putting a floor on that number would produce an indicator that rises when you
+write a test but covers not one line of application code.
 
-Eşik **hedef değil taban**: geriye gitmesin diye var. Gerçekten aşılırsa
-yükseltilir, dal geçsin diye asla indirilmez. İlk konulduğunda 59'du; Graph
-mutasyon sonuçları teste bağlanınca üretim kapsamı 63'e çıktı ve taban da
-yükseltildi. Kırıldığı doğrulandı: eşik değeri geçer, bir üstü exit 2 verir.
+The threshold is **a floor, not a target**: it exists so the number does not go
+backwards. It is raised if it is genuinely exceeded, and never lowered to let a
+branch pass. It was 59 when first set; once the Graph mutation results were tied
+to tests, production coverage rose to 63 and the floor was raised with it. It
+was verified to break: the threshold value passes, one above it exits 2.
 
-En düşük kapsanan yerler ve neden önemli oldukları:
+The least-covered places and why they mattered:
 
-| Modül | Kapsam | Orada bir kusur ne yapar |
+| Module | Coverage | What a defect there does |
 |---|---|---|
-| `actions/entra_id.py` | %23 → **%56** | Her gerçek Graph mutasyonu burada. Durum kodu kontrolü bir kayarsa 403 başarı sayılır, defter "yapıldı" yazar, kimse dokunulmamış hesabı bir daha denemez. `tests/test_graph_mutation_results.py` ile kapatıldı: 11 reddetme kodu × 7 sarmalayıcı, artı transport hatası, artı "zaten istenen durumda" istisnasının dar kalması. 4/4 mutasyon yakalandı |
-| `actions/former_lock.py` | %38 | ETag devralma yarışı; kilit bozulursa elle ekleme apply-mode readback'in ortasına düşüp sahiplik muhasebesini bozar |
-| `utils/checkpoint.py` | %40 | `save()` alan filtreliyor; bir alan sessizce düşerse sonraki koşu yanlış pencereden devam eder |
-| `actions/former_ownership.py` | %53 | Hangi hesabın "bizim" olduğuna karar veren kapı; ters dönerse başkasının kaydı silinir |
+| `actions/entra_id.py` | 23% → **56%** | Every real Graph mutation happens here. If a status-code check slips by one, a 403 counts as success, the ledger writes "done", and nobody retries the untouched account again. Closed with `tests/test_graph_mutation_results.py`: 11 rejection codes × 7 wrappers, plus transport errors, plus keeping the "already in the requested state" exception narrow. 4/4 mutations caught |
+| `actions/former_lock.py` | 38% | The ETag takeover race; if the lock breaks, a manual add lands in the middle of an apply-mode readback and corrupts the ownership accounting |
+| `utils/checkpoint.py` | 40% | `save()` filters fields; if a field silently drops, the next run resumes from the wrong window |
+| `actions/former_ownership.py` | 53% | The gate that decides which account is "ours"; if it inverts, somebody else's record gets deleted |
 
-Bu tablo eşiği yükseltmek için değil, **hangi testin yazılmaya değer olduğunu**
-seçmek için. Yüzdeyi kovalamak bu repo'da işe yaramadı.
+This table is not for raising the threshold, it is for choosing **which test is
+worth writing**. Chasing the percentage did not work in this repo.

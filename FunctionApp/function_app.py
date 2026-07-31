@@ -1328,8 +1328,8 @@ def former_employee_sync(timer: func.TimerRequest) -> None:
     for snap in run["snaps"]:
         cid = snap["row"]["company_id"]
         if snap["error"]:
-            # Company isolation (SESSIZLIK != BASARI): one company's failure is
-            # reported per-item and must not stop the rest of the loop.
+            # Company isolation, and silence is not success: one company's
+            # failure is reported per item and must not stop the rest of the loop.
             summary.append((cid, "FAIL", snap["error"]))
             try:
                 law.write_lifecycle_event(fconf, "former_company_failed",
@@ -1561,7 +1561,7 @@ def former_manual(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="former/preview", auth_level=func.AuthLevel.FUNCTION, methods=["GET"])
 def former_preview(req: func.HttpRequest) -> func.HttpResponse:
-    """Read-only GOSTER endpoint: WHO the next reconcile would add/remove,
+    """Read-only endpoint that shows WHO the next reconcile would add/remove,
     computed on demand via the SAME code path as the timer. Never mutates,
     never persists — clear emails live only in this authenticated response
     (the persistent trail is the hashed LAW audit). preserve = count-only.

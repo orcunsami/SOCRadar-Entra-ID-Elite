@@ -1,7 +1,7 @@
-"""RealFormerListClient birim testi — DRP Former Employees kontratına uygunluk.
-requests mock'lanır, gerçek API'ye gidilmez.
+"""RealFormerListClient unit test — conformance with the DRP Former Employees contract.
+requests is mocked; the real API is never called.
 
-Çalıştırma: python3 tests/test_real_client.py  (FunctionApp kökünden)
+Run: python3 tests/test_real_client.py  (from the FunctionApp root)
 """
 import os
 import sys
@@ -11,7 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# azure.data.tables importunu stub'la (mock client bu testte kullanılmıyor)
+# Stub the azure.data.tables import (the mock client is not used in this test)
 azure_pkg = types.ModuleType("azure")
 tables_mod = types.ModuleType("azure.data.tables")
 tables_mod.TableServiceClient = object
@@ -82,7 +82,7 @@ class TestRealClient(unittest.TestCase):
         self.assertIn("/api/company/330/dark-web-monitoring/add-former-employee", url)
         self.assertEqual(body, {"formerEmployees": ["e1@x.com", "e2@x.com"],
                                 "comment": "elite-sync", "email": "actor@company.com"})
-        # Cloudflare bot-block (preprod error 1010): default python UA yerine açık UA şart
+        # Cloudflare bot-block (preprod error 1010): an explicit UA is required, the default python UA is not enough
         self.assertEqual(headers.get("User-Agent"), "SOCRadar-EntraID-Elite/1.0")
 
     def test_add_logical_400_not_counted(self):
@@ -107,7 +107,7 @@ class TestRealClient(unittest.TestCase):
             self.assertEqual(make_client().remove(["gone@x.com"]), 1)
 
     def test_add_404_is_failure(self):
-        # missing_ok sadece remove'da — add'de 404 hata sayılır
+        # missing_ok applies to remove only — in add a 404 counts as an error
         with mock.patch("actions.socradar_former.requests.post") as p:
             p.return_value = _resp(404, None, text="<html>404</html>")
             self.assertEqual(make_client().add(["e@x.com"], source="s"), 0)

@@ -1,34 +1,36 @@
-# Ürün politikası
+# Product policy
 
-Kodun cevaplayamadığı sorular. Bunlar koda bakarak bilinemez; yanlış tahmin
-edilince de sessizce yanlış bir ürün çıkar.
+The questions the code cannot answer. They cannot be known by reading the
+source, and when they are guessed wrong the wrong product ships quietly.
 
-**Kural**: bir politika sorusuna cevap verilince buraya yazılır. Kod veya
-doküman bu dosyayla çelişiyorsa **bu dosya kazanır**.
+**Rule**: once a policy question is answered, the answer is written here. If the
+code or the docs contradict this file, **this file wins**.
 
-**Açık soru yok.** Yeni bir soru çıkarsa buraya "cevap bekleyen" başlığıyla
-eklenir.
+**No open questions.** If a new one comes up it is added here under an
+"awaiting an answer" heading.
 
 ---
 
-## 1. Sürümleme
+## 1. Versioning
 
-**Karar:** Dışarıya çıkan release **her zaman `v1.0.0`**.
+**Decision:** the release that goes out is **always `v1.0.0`**.
 
-Kod ilerledikçe yeni tag kesilmez; `v1.0.0` release'inin varlığı güncellenir:
+No new tag is cut as the code moves on; the asset on the `v1.0.0` release is
+updated instead:
 
 ```bash
 python3 scripts/build_package.py --out dist/FunctionApp.zip --deps-from <onceki.zip>
 gh release upload v1.0.0 dist/FunctionApp.zip --clobber
 ```
 
-`PackageUri` hiç değişmez. `1.1`, `1.2` gibi numaralar **iç versiyonlamadır**,
-git geçmişinde kalır, müşteriye çıkmaz. Numara ancak Microsoft Partner veya
-Content Hub fork'unda büyür (Content Hub V3 paketi ayrı kural: `3.0.0`).
+`PackageUri` never changes. Numbers like `1.1` and `1.2` are **internal
+versioning**: they stay in the git history and never reach a customer. The
+number only goes up in Microsoft Partner or in the Content Hub fork (the Content
+Hub V3 package is a separate rule: `3.0.0`).
 
-**Yan etki, atlanmamalı:** `v1.0.0` varlığını değiştirmek, o URL'e bağlı
-**çalışan** kurulumları bir sonraki yeniden başlatmada yeni koda geçirir.
-Yapmadan önce hangi app'lerin bağlı olduğuna bak ve söyle:
+**Side effect, not to be skipped:** replacing the `v1.0.0` asset moves every
+**running** installation bound to that URL onto the new code at its next
+restart. Before doing it, look at which apps are bound to it and say so:
 
 ```bash
 az functionapp config appsettings list -g <rg> -n <app> \
@@ -37,261 +39,273 @@ az functionapp config appsettings list -g <rg> -n <app> \
 
 ---
 
-## 2. Sızan kimlik bilgisinin kaydı
+## 2. How a leaked credential is stored
 
-**Karar:** Kimlik bilgisi **SOCRadar nasıl gönderdiyse
-öyle** kaydedilir. Maskeli mi düz mü kararı SOCRadar platformunda, şirket
-bazında verilir. Uygulama tarafında ikinci bir anahtar **yoktur**.
+**Decision:** the credential is recorded **exactly as SOCRadar delivered it**.
+Masked or in the clear is decided in the SOCRadar platform, per company. There
+is **no** second switch on the application side.
 
-Gerekçe: iki taraflı anahtar, kaydın geldiği kaynakla çelişmesine yol açıyordu.
-Müşteri SOCRadar'da düz istemişse ve bizim ayar kapalıysa, LAW'da şifre hiç
-görünmüyordu ve kimse hangisine inanacağını bilmiyordu.
+Why: a switch on both sides let the record contradict the source it came from.
+If the customer asked for cleartext in SOCRadar and our setting was off, the
+password never appeared in LAW and nobody knew which of the two to believe.
 
-`password_masked` kolonu her hâlükârda yerelde üretilir, böylece bir pano
-kimlik bilgisine hiç bakmadan güvenli bir şey gösterebilir.
-
----
-
-## 3. İlk koşu ve mutasyon
-
-**Karar:** `RunOnStartup` **`true` kalır**. Kurulum biter
-bitmez former sync koşar ve `FormerApplyChanges=true` olduğu için yazar.
-
-Gerekçe: "kur ve çalışsın" deneyimi, ilk koşuyu plan-only yapmanın getireceği
-korumadan değerli. Koruma zaten katmanlı: bootstrap koşusunda silme sayısı
-sıfır, `FormerMaxRemovals` ve `FormerMaxRemovalPercent` tavanları,
-veri-bütünlüğü kapısı. Preview'e bakmak isteyen formda Apply changes'i
-kapatarak deploy eder.
+The `password_masked` column is derived locally either way, so a dashboard can
+show something safe without ever looking at the credential.
 
 ---
 
-## 4. Grup tenant'ları
+## 3. First run and mutation
 
-**Karar:** Şirket satırı olmayan grup tenant'ları için
-forma bir alan eklendi (`Other group tenants`, `GROUP_TENANT_IDS`).
+**Decision:** `RunOnStartup` **stays `true`**. The former sync runs as soon as
+the deployment finishes, and because `FormerApplyChanges=true` it writes.
 
-Netleştirme, çünkü ilk tarif yanlıştı: çapraz-tenant bastırma portal
-kurulumuyla **zaten çalışıyordu**. `derive_group_tenants()` grid satırlarından
-tam mesh kurar, yani her şirketin grup tenant'ları diğer satırların kendi
-tenant'larıdır. Elle ayar gerekmiyordu.
+Why: the "deploy it and it works" experience is worth more than the protection a
+plan-only first run would add. The protection is layered anyway: the bootstrap
+run removes nothing, there are the `FormerMaxRemovals` and
+`FormerMaxRemovalPercent` ceilings, and the data-completeness guard. Anyone who
+wants to look at the preview deploys with Apply changes off in the form.
 
-Gerçek boşluk dardı: grid her satırda company ID **zorunlu** tuttuğu için,
-gruba ait olup platformda şirketi olmayan bir tenant (holding tenant'ı gibi)
-grid'de ifade edilemiyordu. Yeni alan tam olarak bunu karşılar: aktif üyeleri
-her şirketin former listesine yazılır, kendisi liste almaz.
+---
 
-Uyarı formda yazılı: listelenen her tenant'ta uygulamanın consent'i olmalı,
-yoksa anlık görüntü eksik sayılır ve silmeler tutulur.
+## 4. Group tenants
+
+**Decision:** a field was added to the form for group tenants that have no
+company row (`Other group tenants`, `GROUP_TENANT_IDS`).
+
+A clarification, because the first description was wrong: cross-tenant
+suppression **already worked** with a portal deployment. `derive_group_tenants()`
+builds a full mesh out of the grid rows, so a company's group tenants are the
+other rows' own tenants. No manual setting was needed.
+
+The real gap was narrow: because the grid **requires** a company ID on every
+row, a tenant that belongs to the group but has no company on the platform (a
+holding tenant, say) could not be expressed in the grid. The new field covers
+exactly that: its active members are written into every company's former list,
+and it never receives a list itself.
+
+The warning is written in the form: the app has to be consented in every tenant
+listed there, otherwise the snapshot counts as incomplete and removals are
+withheld.
 
 ---
 
 ## 5. Leak remediation
 
-**Karar:** Kapı **kalktı**. Özellik formda varsayılan
-kapalı gelir, açmak isteyen açar, sorumluluk açanda.
+**Decision:** the gate is **gone**. The feature ships off by default in the
+form; whoever wants it turns it on, and the responsibility is theirs.
 
-Varsayılanlar bunu güvenli kılıyor ve teste bağlandı
+The defaults make that safe and they are pinned to a test
 (`tests/test_form_contract.py`): `EnableLeakMonitoring=false`,
-`LeakResponse=logOnly`, ve `respond` seçilmedikçe Graph yazma izinleri **hiç
-istenmiyor**.
+`LeakResponse=logOnly`, and unless `respond` is picked the Graph write
+permissions are **never requested**.
 
-Kapıyla birlikte eklenen şart: geri alınamaz aksiyonun **formda** yazılı
-olması. Daha önce sadece README'de yazıyordu; müşteri riski formda kabul
-ediyor, uyarının orada olması gerekiyordu. Gerçekten geri alınamayan tek
-aksiyon MFA sıfırlama; diğerleri Entra'dan geri alınabiliyor ve README'nin
-geri-alma tablosu yolu gösteriyor.
-
----
-
-## 6. Defter büyümesi
-
-**Karar:** Eski satırları silen bir temizlik koşusu
-eklendi.
-
-Her apply koşusunun sonunda, saklama süresini geçmiş satırlar sınırlı bir
-dilim hâlinde silinir. Varsayılan 90 gün (`LEAK_LEDGER_RETENTION_DAYS`).
-
-Tehlike tek yönlü: bir re-read'in hâlâ ulaşabildiği satırı silmek aynı kişiye
-ikinci kez aksiyon uygulanmasına yol açar. Bunu **iki** koruma birlikte
-engelliyor, biri yetmiyor:
-
-**Taban.** `MIN_RETENTION_DAYS = 30`; ayar yanlış girilse bile uygulanır.
-Süregelen pencere en fazla 24 saat, tutulan pencere birkaç kez denenir, 30 gün
-ikisinin de üstünde.
-
-**Aktif pencere clamp'i.** Taban tek başına yetmiyor ve ilk yazdığım gerekçe
-yorumu bu yüzden yanlıştı. `LeakInitialLookbackDays` formda açık ve 365'e kadar
-seçilebiliyor. 365 seçen bir müşterinin ilk koşusu satırlarını bir yıl geriye
-damgalar; 90 günlük cutoff **o koşunun kendi defter kayıtlarını** siler ve
-kurulumun göreceği en büyük batch'te idempotency kırılır. Bu yüzden cutoff
-işlenen pencereye asla ulaşmıyor: `min(cutoff, active_window)`.
-
-Gerçek Azure Table'da doğrulandı, clamp'siz hâli de yeniden üretilerek: cutoff
-clamp'lenmediğinde aktif pencerenin kaydı **gerçekten** siliniyor.
-
-**UTC.** Cutoff host saatinden değil UTC'den hesaplanıyor. Karşılaştırdığı
-pencere damgaları da UTC'den üretiliyor (`sources/base_fetcher`,
-`utils/checkpoint`), yerel saatle hesaplanan bir cutoff filtrelediği
-değerlerden bir gün kayardı. Kod tabanında saat okuyan her çağrının
-timezone-aware olması `tests/test_utc_convention.py` ile kilitli (AST taraması,
-literal grep varyantları kaçırıyor).
-
-Temizlik başarısız olursa koşu **düşmez**, satırlar kalır ve durum loglanır.
-Bayat satır tutmak güvenli, koşuyu kaybetmek değil.
-
-`leak/probe` kendi bölümüne (`probe:<company>`) yazar ve zamanlayıcı koşusu
-oraya dokunmaz. Bu yüzden probe da işini bitirince kendi bölümünü temizler,
-ama küçük dilimle (50 satır): çağıran cevabı bekliyor.
-
-Ayar şablonda yazılı (`LeakLedgerRetentionDays` → `LEAK_LEDGER_RETENTION_DAYS`),
-formda değil. Kodun okuyup şablonun yazmadığı bir isim sessizce varsayılana
-düşer; ileri düzey ayar bile olsa şablonda görünür olmalı.
+The condition that came with dropping the gate: the irreversible action has to
+be written **in the form**. It was only in the README before; the customer
+accepts the risk in the form, so the warning had to be there. The only truly
+irreversible action is the MFA reset; the others can be undone from Entra ID and
+the README's undo table shows the way.
 
 ---
 
-## 7. Sürüm görünürlüğü
+## 6. Ledger growth
 
-**Karar:** Gerek yok. Kurulu app kendi sürümünü
-söylemeyecek.
+**Decision:** a cleanup pass that deletes old rows was added.
 
-Hangi kodun koştuğu merak edilirse `WEBSITE_RUN_FROM_PACKAGE`'daki paket
-indirilip bakılır. Kod tarafında sürüm sabiti tutulmaz, LAW'a yazılmaz, DCR
-şemasına kolon eklenmez.
+At the end of every apply run, rows past the retention period are deleted in a
+bounded slice. The default is 90 days (`LEAK_LEDGER_RETENTION_DAYS`).
 
----
+The danger runs one way: deleting a row a re-read can still reach leads to a
+second action against the same person. **Two** protections together stop that;
+one is not enough:
 
-## 9. Denetlenebilirlik: objectId kayda girer
+**A floor.** `MIN_RETENTION_DAYS = 30`, applied even if the setting is entered
+wrong. The ongoing window is at most 24 hours, a held window is retried a few
+times, and 30 days is above both.
 
-**Karar:** `entra_user_id` (Graph objectId) Log Analytics
-satırına yazılır.
+**Active-window clamp.** The floor on its own is not enough, and the rationale
+comment written first was wrong for exactly that reason.
+`LeakInitialLookbackDays` is exposed in the form and can be set as high as 365.
+The first run of a customer who picks 365 stamps its rows a year back; a 90-day
+cutoff deletes **that run's own ledger records** and idempotency breaks on the
+largest batch the installation will ever see. So the cutoff never reaches the
+window being processed: `min(cutoff, active_window)`.
 
-Gerekçe: müşterinin ilk sorusu "app bunu gerçekten yaptı mı" ve bunu bağımsız
-kaynaktan, Microsoft Entra ID'nin **kendi** audit log'undan doğrulamak istiyor.
-objectId iki kaydı birleştiren tek alan. O olmadan iki liste yan yana konamıyor.
+Verified against a real Azure Table, with the unclamped version reproduced too:
+when the cutoff is not clamped, the active window's record really is deleted.
 
-Bu bir gizlilik tercihinin geri alınması **değildi**: alan `_clean_record`
-içinde `_checkpoint_update` ve `_empty_marker` ile aynı "iç alan" kümesindeydi,
-yani hiç düşünülmemişti.
+**UTC.** The cutoff is computed from UTC, not from the host clock. The window
+stamps it compares against are produced from UTC too (`sources/base_fetcher`,
+`utils/checkpoint`); a cutoff computed in local time would be a day off from the
+values it filters. That every clock read in the codebase is timezone-aware is
+locked down by `tests/test_utc_convention.py` (an AST scan — a literal grep
+misses the variants).
 
-Tuzak, yapılırken not edildi: kolon DCR stream'ine de eklenmezse kural onu
-sessizce atar ve yükleme başarı bildirir. İkisi birlikte yapıldı, üç leak
-stream'inde de canlı doğrulandı.
+If the cleanup fails the run does **not** go down with it: the rows stay and the
+situation is logged. Keeping a stale row is safe; losing the run is not.
 
----
+`leak/probe` writes to its own partition (`probe:<company>`) and the timer run
+does not touch it. So the probe cleans its own partition when it is done, but
+with a small slice (50 rows): the caller is waiting for an answer.
 
-## 10. Feed'deki her adres Graph'a gitmez
-
-**Karar:** Portal formuna opsiyonel "Your own email
-domains" alanı eklendi (`VerifiedDomains` → `ENTRA_ID_VERIFIED_DOMAINS`).
-
-Ayar kod tarafında zaten okunuyordu ama şablon hiç yazmıyordu, yani boştu ve
-feed'in döndürdüğü **her adres** Microsoft Graph'a sorgulanıyordu, müşteriyle
-ilgisi olsun olmasın.
-
-Süzme lookup'tan **önce** çalışır: alan dışı adres app'in içinde düşer,
-Microsoft'a hiç ulaşmaz. Boş bırakılırsa eski davranış aynen sürer, yani mevcut
-kurulumlar etkilenmez.
-
----
-
-## 11. İlk leak koşusu kurulumda gelir
-
-**Karar:** `RUN_ON_STARTUP` former sync ile aynı parametreye
-bağlandı.
-
-Önce şablonda sabit `false` idi: leak monitoring açan müşteri ilk sonucu
-zamanlamaya kadar, 6 saate kadar bekliyordu ve bunun beklenen davranış mı bozuk
-kurulum mu olduğunu ayırt edemiyordu. Former sync ise kurulumda koşuyordu, yani
-asimetri belgelenmemişti.
-
-**Bilinen ve kabul edilen yan etki:** `respond` seçiliyse ilk koşu
-kurulum anında gerçek hesap değişikliği yapabilir. Varsayılan `logOnly` ve form
-geri alınamaz aksiyonları sayıyor, yani `respond`'u seçen bunu bilerek seçiyor.
+The setting is written by the template (`LeakLedgerRetentionDays` →
+`LEAK_LEDGER_RETENTION_DAYS`), not by the form. A name the code reads and the
+template does not write falls back to the default silently; even an advanced
+setting has to be visible in the template.
 
 ---
 
-## 12. Tek sorgu yüzeyi
+## 7. Version visibility
 
-**Karar:** Application Insights, şablonun oluşturduğu Log
-Analytics workspace'ine bağlı kuruluyor.
+**Decision:** not needed. An installed app will not report its own version.
 
-Klasik bileşen olarak app'in izleri ayrı bir kaynakta duruyordu, audit tabloları
-ise workspace'te. "App bunu yaptığını söylüyor, yaptı mı" sorusu iki ayrı yerden
-sorgu ve birleştirme imkânı olmayan iki veri kümesi anlamına geliyordu.
-
-Canlı doğrulandı: tek KQL sorgusu `AppTraces` ile `SOCRadar_EntraID_Audit_CL`'i
-birlikte döndürüyor.
+If which code is running is in question, the package at
+`WEBSITE_RUN_FROM_PACKAGE` is downloaded and looked at. No version constant is
+kept in the code, nothing is written to LAW, and no column is added to the DCR
+schema.
 
 ---
 
-## 13. VIP kaydında adres: varsa kullanılır, yoksa uydurulmaz
+## 9. Auditability: the objectId goes into the record
 
-**Karar.** Bir leak kaydının adresi, `@` taşıyan **ilk** alandan alınır
-(`vipName` → `email` → `keyword`). Hiçbiri taşımıyorsa adres **yoktur**; kayıt
-`entra_status = skipped_no_address` ile yazılır ve Microsoft Graph'a
-sorulmaz.
+**Decision:** `entra_user_id` (the Graph objectId) is written into the Log
+Analytics row.
 
-**Neden.** VIP kayıtları çoğu zaman bir kişiyi **adıyla** anar. Canlı bir
-örneklemde her kaydın `vipName`'i ad-soyaddı, hiçbirinde `@` yoktu ve hiçbiri
-`email` alanı taşımıyordu. Eski kod `vipName`'i adres sayıyordu, yani Graph'a
-"Ad Soyad" soruluyordu; Graph buna 404 veriyor — hiç duyulmamış bir adrese
-verdiği cevabın aynısı. Sonuç: `error_count = 0` ile biten, tertemiz görünen ve
-**yapısal olarak hiç kimseyi eşleştiremeyecek** bir koşu.
+Why: the customer's first question is "did the app really do this", and they
+want to confirm it from an independent source — Microsoft Entra ID's **own**
+audit log. The objectId is the only field that joins the two records. Without it
+the two lists cannot be put side by side.
 
-**Genişletilmeyecek yer.** `history` alanında adres bulunur (örneklemde
-kayıtların yarısında), ama `operator` alt-alanındadır: kaydı işleyen analistin
-adresi. Örneklemde hiçbiri kaydın kendi öznesiyle örtüşmedi. Oradan adres almak
-lookup'ı ve silahlıysa aksiyonu **yanlış kişiye** yöneltir. Kod içine yazıldı.
+This was **not** a privacy choice being reversed: in `_clean_record` the field
+sat in the same "internal field" set as `_checkpoint_update` and
+`_empty_marker`, which means it had never been thought about at all.
+
+The trap was noted while doing it: unless the column is added to the DCR stream
+as well, the rule drops it silently and the upload reports success. Both were
+done together and verified live on all three leak streams.
 
 ---
 
-## 14. Her kayıt bir kovaya düşer, toplam kapanır
+## 10. Not every address in a feed goes to Graph
 
-**Karar.** `total_records` = `found_count` + `not_found_count` + `domain_filtered` +
+**Decision:** an optional "Your own email domains" field was added to the portal
+form (`VerifiedDomains` → `ENTRA_ID_VERIFIED_DOMAINS`).
+
+The code already read the setting but the template never wrote it, so it was
+empty and **every address** the feed returned was queried against Microsoft
+Graph, whether it had anything to do with the customer or not.
+
+The filter runs **before** the lookup: an out-of-domain address is dropped
+inside the app and never reaches Microsoft. Left empty, the old behaviour
+continues exactly as before, so existing installations are not affected.
+
+---
+
+## 11. The first leak run comes with the deployment
+
+**Decision:** `RUN_ON_STARTUP` was bound to the same parameter as the former
+sync.
+
+It was hardcoded `false` in the template before: a customer who turned leak
+monitoring on waited for the schedule, up to 6 hours, for the first result, and
+could not tell whether that was the expected behaviour or a broken deployment.
+The former sync, meanwhile, ran at deployment, so the asymmetry was never
+documented.
+
+**A known and accepted side effect:** if `respond` is picked, the first run can
+change real accounts at deployment time. The default is `logOnly` and the form
+lists the irreversible actions, so whoever picks `respond` picks it knowingly.
+
+---
+
+## 12. One query surface
+
+**Decision:** Application Insights is created bound to the Log Analytics
+workspace the template creates.
+
+As a classic component the app's traces sat in a separate resource while the
+audit tables sat in the workspace. The question "the app says it did this, did
+it" meant a query in two separate places and two data sets with no way to join
+them.
+
+Verified live: a single KQL query returns `AppTraces` and
+`SOCRadar_EntraID_Audit_CL` together.
+
+---
+
+## 13. The address on a VIP record: used if it is there, never invented
+
+**Decision.** A leak record's address is taken from the **first** field that
+carries an `@` (`vipName` → `email` → `keyword`). If none of them does, there
+**is no** address; the record is written with
+`entra_status = skipped_no_address` and Microsoft Graph is not asked about it.
+
+**Why.** VIP records usually name a person **by name**. In a live sample every
+record's `vipName` was a first and last name, none of them carried an `@`, and
+none of them had an `email` field. The old code treated `vipName` as the
+address, so Graph was asked about "First Last"; Graph answers that with a 404 —
+the same answer it gives for an address it has never heard of. The result: a run
+that ends with `error_count = 0`, looks spotless, and **structurally cannot
+match anybody**.
+
+**Where this will not be extended.** There are addresses in the `history` field
+(in half the records in the sample), but they are under the `operator`
+sub-field: the address of the analyst who handled the record. In the sample not
+one of them coincided with the record's own subject. Taking an address from
+there points the lookup — and, if it is armed, the action — at the **wrong
+person**. This is written into the code.
+
+---
+
+## 14. Every record falls into one bucket, and the total closes
+
+**Decision.** `total_records` = `found_count` + `not_found_count` + `domain_filtered` +
 `no_address_count` + `lookup_disabled_count` + `no_token_count` +
-`lookup_failed_count`. Bakılmayan ya da bakılamayan her kayıt kendi sayacına yazılır.
+`lookup_failed_count`. Every record that was not looked at, or could not be, is written to its own counter.
 
-**Neden.** Önce bu kayıt hiçbir kovaya girmiyordu; toplam parçalardan büyüktü ve
-farkın adı yoktu. Panoda "169 kayıt işlendi, 0 eşleşme" gören biri, kimsenin
-eşleşmediğini mi yoksa kimseye bakılmadığını mı okuduğunu ayırt edemiyordu.
+**Why.** Before, such a record went into no bucket at all; the total was larger
+than the parts and the difference had no name. Someone seeing "169 records
+processed, 0 matches" on a dashboard could not tell whether they were reading
+that nobody matched or that nobody was looked up.
 
-**Yan etki.** Kolon hem DCR stream'inde hem LAW tablosunda bildirildi (ikisi de
-aynı `importAuditColumns` değişkeninden beslenir). **Mevcut kurulumlar** kendi
-DCR'larını kurulum anında oluşturdu, yeni kolonu bilmezler, o yüzden alan orada
-sessizce düşer — diğer sayaçları etkilenmez, yeniden deploy edince gelir.
-
----
-
-## 15. Denetim satırı yalnız okunmuş olanı söyler
-
-**Karar.** Kullanıcı araması Graph'tan `id,userPrincipalName,accountEnabled`
-alanlarını **adıyla** ister. Gelmeyen alan için varsayılan **üretilmez**;
-`entra_account_enabled` okunmadıysa boş kalır.
-
-**Neden.** Graph, `GET /users/{id}` için sabit bir varsayılan alan kümesi
-döndürür ve `accountEnabled` o kümede **yoktur**. Alan hiç gelmiyordu, kod ise
-`get("accountEnabled", True)` ile dolduruyordu — yani eşleşen **her** kullanıcı
-için "hesap açıktı" yazılıyordu, hiç okunmadan. Devre dışı bir hesap "açık"
-görünürdü. "Bilinmiyor" doğru, "açık" tahmindi.
+**Side effect.** The column is declared both in the DCR stream and in the LAW
+table (both are fed from the same `importAuditColumns` variable). **Existing
+installations** created their own DCRs at deployment time and do not know the new
+column, so the field is dropped there silently — their other counters are
+unaffected, and it arrives on a redeploy.
 
 ---
 
-## 16. "Bakmadım" ile "bulamadım" ayrı raporlanır
+## 15. An audit row only states what was actually read
 
-**Karar.** `leak/probe` hiç tenant aramadıysa `apply_reason` bunu söyler ve
-sebebini adlandırır (lookup kapalı / Graph token yok). "Bulunamadı" yalnız
-gerçekten arandığında yazılır.
+**Decision.** The user lookup asks Graph for `id,userPrincipalName,accountEnabled`
+**by name**. No default is **produced** for a field that does not come back; if
+`entra_account_enabled` was not read, it stays empty.
 
-**Neden.** Operatörün adımı iki durumda farklı: gerçek ıska "adres dizinde yok"
-demek, okunmamışlık "lookup'ı aç ya da token'ın neden verilmediğine bak" demek.
-Boş sonucu olumsuz sonuç gibi raporlamak bu projenin tekrar eden hata sınıfı.
+**Why.** Graph returns a fixed default set of fields for `GET /users/{id}`, and
+`accountEnabled` is **not** in that set. The field never arrived, and the code
+filled it in with `get("accountEnabled", True)` — so for **every** matched user
+it recorded "the account was enabled", without ever reading it. A disabled
+account looked enabled. "Unknown" is correct; "enabled" was a guess.
 
 ---
 
-## 8. Yazılı karara bağlanmış diğer kısıtlar
+## 16. "Did not look" and "did not find" are reported separately
 
-| Konu | Karar |
+**Decision.** If `leak/probe` searched no tenant at all, `apply_reason` says so
+and names the reason (lookup off / no Graph token). "Not found" is only written
+when a search actually happened.
+
+**Why.** The operator's next step differs between the two: a real miss means
+"the address is not in the directory", not having looked means "turn the lookup
+on, or find out why no token was issued". Reporting an empty result as a
+negative result is this project's recurring class of mistake.
+
+---
+
+## 8. Other constraints settled in writing
+
+| Subject | Decision |
 |---|---|
-| Test bitince Azure kaynağı kapatılır | Zorunlu |
-| Dış repo'ya onaysız PR/push | Yasak |
-| `create_incident` ve `ROPC` | Şablonda bilinçli kapalı (`main.bicep` yorumu) |
+| Azure resources are shut down when a test ends | Mandatory |
+| Unapproved PR or push to an external repo | Forbidden |
+| `create_incident` and `ROPC` | Deliberately off in the template (comment in `main.bicep`) |
