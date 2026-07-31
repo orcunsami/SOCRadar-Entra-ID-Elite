@@ -233,8 +233,10 @@ SOCRadar_ImportAudit_CL
 ```kusto
 // Anything that went wrong in the last day
 SOCRadar_ImportAudit_CL
-| where TimeGenerated > ago(1d) and (error_count > 0 or truncated or capped)
-| project TimeGenerated, company_id, source, error_count, truncated
+| where TimeGenerated > ago(1d)
+        and (error_count > 0 or truncated or capped or lookup_failed_count > 0)
+| project TimeGenerated, company_id, source, error_count, lookup_failed_count,
+          truncated, capped
 ```
 
 ```kusto
