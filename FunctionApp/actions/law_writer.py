@@ -148,6 +148,11 @@ def write_lifecycle_event(conf: dict, event_type: str, tenant_id: str = "", deta
         "TimeGenerated": datetime.now(timezone.utc).isoformat(),
         "source":     "lifecycle",
         "event_type": event_type,
+        # Without this the row lands with an empty company, so a per-company
+        # query over the audit table silently skips every lifecycle event —
+        # the failures, in a multi-company deployment, of exactly the company
+        # somebody is investigating.
+        "company_id": str(conf.get("socradar_company_id", "")),
         "tenant_id":  tenant_id,
         "details":    details[:1000] if details else "",
     }

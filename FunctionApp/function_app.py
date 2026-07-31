@@ -1129,6 +1129,19 @@ def _prefetch_tenant_data(fconf: dict, tenant_ids: list, own_union: set) -> dict
         except Exception as e:
             entry["error"] = str(e)[:200]
             logger.error("[FORMER] tenant %s read FAILED: %s", tenant_id, e)
+            # A tenant that cannot be read ends the run as
+            # "incomplete_snapshot", and that one phrase covers revoked
+            # consent, a missing federated credential, exhausted throttling
+            # and a network fault alike. The log line names the cause but
+            # logs age out; without a row here the persistent trail cannot
+            # say which of them it was.
+            try:
+                law.write_lifecycle_event(
+                    fconf, "former_tenant_read_failed",
+                    tenant_id=tenant_id, details=str(e)[:400])
+            except Exception as audit_error:
+                logger.error("[FORMER] tenant %s read failure could not be "
+                             "recorded: %s", tenant_id, audit_error)
         data[tenant_id] = entry
     return data
 
