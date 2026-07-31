@@ -16,8 +16,18 @@ mkdir -p "$OUT"
 LIMIT="${BACKUP_LIMIT:-5000}"
 
 warn_if_truncated() {
-  rows=$(python3 -c "import json,sys;print(len(json.load(open(sys.argv[1]))))" "$OUT/$1.json" 2>/dev/null || echo 0)
-  if [ "$rows" -ge "$LIMIT" ]; then
+  # `az storage entity query` answers with {"items": [...], "nextMarker": ...},
+  # so counting the top level always returned 2 and this check never fired.
+  # nextMarker is the authoritative signal: the service sets it when it has
+  # more rows to give.
+  rows=$(python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1]))
+items=d.get('items', d) if isinstance(d,dict) else d
+print(len(items), 1 if (isinstance(d,dict) and d.get('nextMarker')) else 0)
+" "$OUT/$1.json" 2>/dev/null || echo "0 0")
+  more=${rows#* }; rows=${rows%% *}
+  if [ "$rows" -ge "$LIMIT" ] || [ "$more" = "1" ]; then
     echo "  WARNING: $1 returned $rows rows = the limit. This backup is INCOMPLETE."
     echo "           Re-run with a higher cap: BACKUP_LIMIT=$((LIMIT * 4)) sh backup-state.sh $SA"
     TRUNCATED="${TRUNCATED}$1 "

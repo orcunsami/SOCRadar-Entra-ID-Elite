@@ -72,12 +72,13 @@ def audit_summary(source: str, total: int, employees: int,
                   found: int, not_found: int, actions: int,
                   errors: int, duration_sec: float,
                   domain_filtered: int = 0, no_address: int = 0,
-                  lookup_disabled: int = 0, no_token: int = 0):
+                  lookup_disabled: int = 0, no_token: int = 0,
+                  lookup_failed: int = 0):
     log = logging.getLogger("socradar.entra.audit")
     log.info(
         "[AUDIT] source=%s total=%d employees=%d found=%d not_found=%d "
-        "no_address=%d lookup_disabled=%d no_token=%d domain_filtered=%d "
+        "no_address=%d lookup_disabled=%d no_token=%d lookup_failed=%d domain_filtered=%d "
         "actions=%d errors=%d duration=%.1fs",
         source, total, employees, found, not_found, no_address,
-        lookup_disabled, no_token, domain_filtered, actions, errors, duration_sec
+        lookup_disabled, no_token, lookup_failed, domain_filtered, actions, errors, duration_sec
     )

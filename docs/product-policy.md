@@ -95,9 +95,11 @@ Varsayılanlar bunu güvenli kılıyor ve teste bağlandı
 `LeakResponse=logOnly`, ve `respond` seçilmedikçe Graph yazma izinleri **hiç
 istenmiyor**.
 
-Kapıyla birlikte eklenen şart: üç aksiyonun geri alınamaz olduğu **formda**
-yazılı. Daha önce sadece README'de yazıyordu; müşteri riski formda kabul
-ediyor, uyarının orada olması gerekiyordu.
+Kapıyla birlikte eklenen şart: geri alınamaz aksiyonun **formda** yazılı
+olması. Daha önce sadece README'de yazıyordu; müşteri riski formda kabul
+ediyor, uyarının orada olması gerekiyordu. Gerçekten geri alınamayan tek
+aksiyon MFA sıfırlama; diğerleri Entra'dan geri alınabiliyor ve README'nin
+geri-alma tablosu yolu gösteriyor.
 
 ---
 
@@ -245,8 +247,9 @@ lookup'ı ve silahlıysa aksiyonu **yanlış kişiye** yöneltir. Kod içine yaz
 
 ## 14. Her kayıt bir kovaya düşer, toplam kapanır
 
-**Karar.** `total_records = found_count + not_found_count + domain_filtered +
-no_address_count`. Adresi olmadığı için bakılmayan kayıt kendi sayacına yazılır.
+**Karar.** `total_records` = `found_count` + `not_found_count` + `domain_filtered` +
+`no_address_count` + `lookup_disabled_count` + `no_token_count` +
+`lookup_failed_count`. Bakılmayan ya da bakılamayan her kayıt kendi sayacına yazılır.
 
 **Neden.** Önce bu kayıt hiçbir kovaya girmiyordu; toplam parçalardan büyüktü ve
 farkın adı yoktu. Panoda "169 kayıt işlendi, 0 eşleşme" gören biri, kimsenin

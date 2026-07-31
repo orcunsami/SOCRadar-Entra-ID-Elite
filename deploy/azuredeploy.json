@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.45.15.27210",
-      "templateHash": "2348387919153894716"
+      "templateHash": "15001574052704254406"
     }
   },
   "parameters": {
@@ -506,6 +506,10 @@
       },
       {
         "name": "no_token_count",
+        "type": "int"
+      },
+      {
+        "name": "lookup_failed_count",
         "type": "int"
       },
       {

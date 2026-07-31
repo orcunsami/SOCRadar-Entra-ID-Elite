@@ -393,6 +393,7 @@ var importAuditColumns = [
   { name: 'no_address_count', type: 'int' }
   { name: 'lookup_disabled_count', type: 'int' }
   { name: 'no_token_count', type: 'int' }
+  { name: 'lookup_failed_count', type: 'int' }
   { name: 'capped', type: 'boolean' }
   { name: 'truncated', type: 'boolean' }
   { name: 'duration_sec', type: 'real' }

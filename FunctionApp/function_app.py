@@ -183,6 +183,7 @@ def socradar_entra_id_import(timer: func.TimerRequest) -> None:
             no_address=r.get("no_address", 0),
             lookup_disabled=r.get("lookup_disabled", 0),
             no_token=r.get("no_token", 0),
+            lookup_failed=r.get("lookup_failed", 0),
         )
 
     if conf.get("dcr_immutable_id") and conf.get("dcr_endpoint"):
@@ -480,6 +481,7 @@ def _empty_audit(source_name: str, company_id: str, errors: int,
         "total": 0, "employees": 0, "found": 0, "not_found": 0,
         "actions": 0, "errors": errors, "duration": 0.0,
         "domain_filtered": 0, "no_address": 0, "lookup_disabled": 0, "no_token": 0,
+        "lookup_failed": 0,
         "capped": False, "truncated": truncated,
     }
 
@@ -1064,6 +1066,11 @@ def _process_source(source_name: str, conf: dict, credential, tenant_headers_map
         "no_address": no_address,
         "lookup_disabled": lookup_disabled,
         "no_token": no_token,
+        # A lookup that failed is not a lookup that came back empty. Counting
+        # these only in `errors` left them out of the buckets, so the totals
+        # stopped adding up exactly when something had gone wrong — the case
+        # the equation exists to surface.
+        "lookup_failed": lookup_failures,
         "capped":     capped,
         # Without this a run that stopped at 12% is indistinguishable from a
         # complete one: "no findings" and "we never got that far" look alike.

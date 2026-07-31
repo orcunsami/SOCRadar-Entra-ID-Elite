@@ -24,7 +24,10 @@ TEMPLATE = REPO / "deploy" / "azuredeploy.json"
 
 # Responses that leave no way back. The form has to name them where the
 # customer picks a response, not only in the README they may never open.
-IRREVERSIBLE = ("revokeSessions", "forcePasswordChange", "resetMfa")
+# Only this one has no way back. The README's undo table gives a route for
+# sign-out and password change, so calling those irreversible too diluted the
+# warning on the one that matters.
+IRREVERSIBLE = ("resetMfa",)
 
 
 def _form():
@@ -126,7 +129,7 @@ class LeakDefaultsTest(unittest.TestCase):
 
 
 class IrreversibilityWarningTest(unittest.TestCase):
-    """Three responses cannot be undone. The customer accepts that risk at the
+    """One response cannot be undone. The customer accepts that risk at the
     moment they pick a response, so the form has to say so there."""
 
     def _note(self):
@@ -151,6 +154,13 @@ class IrreversibilityWarningTest(unittest.TestCase):
         offered = {o["value"] for o in actions["constraints"]["allowedValues"]}
         self.assertTrue(set(IRREVERSIBLE) <= offered,
                         f"warning lists {IRREVERSIBLE}, form offers {offered}")
+
+    def test_the_form_does_not_overstate_how_many_cannot_be_undone(self):
+        """Substring checks let the count drift: the note said three while the
+        README documented an undo route for two of them, and nothing failed."""
+        text = self._note()["options"]["text"]
+        self.assertNotIn("Three of these cannot be undone", text)
+        self.assertIn("One of these cannot be undone", text)
 
 
 if __name__ == "__main__":

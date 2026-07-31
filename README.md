@@ -114,10 +114,15 @@ a Graph token, so those findings were never checked against anybody. A run that
 reports the second one holds its window and reads it again rather than retiring
 findings nobody looked at.
 
+A lookup can also fail outright, with a 403 or a server error. That is not the
+same as coming back empty, so it has its own counter, `lookup_failed_count`,
+and the window is held and read again rather than written off.
+
 Every record the run handled falls into exactly one of `found_count`,
 `not_found_count`, `domain_filtered`, `no_address_count`,
-`lookup_disabled_count` and `no_token_count`, and those six add up to
-`total_records`. If they ever do not, the summary is hiding something.
+`lookup_disabled_count`, `no_token_count` and `lookup_failed_count`, and those
+seven add up to `total_records`. If they ever do not, the summary is hiding
+something.
 
 Safety works the same way as the former sync:
 
@@ -196,7 +201,8 @@ SOCRadar_ImportAudit_CL
 | order by TimeGenerated desc
 | project TimeGenerated, company_id, source, total_records, found_count,
           not_found_count, no_address_count, lookup_disabled_count,
-          no_token_count, domain_filtered, actions_taken, error_count, truncated
+          no_token_count, lookup_failed_count, domain_filtered, actions_taken,
+          error_count, capped, truncated
 | take 20
 ```
 
@@ -206,6 +212,7 @@ SOCRadar_ImportAudit_CL
 | where TimeGenerated > ago(7d)
 | extend accounted = found_count + not_found_count + domain_filtered
                    + no_address_count + lookup_disabled_count + no_token_count
+                   + lookup_failed_count
 | where accounted != total_records
 | project TimeGenerated, company_id, source, total_records, accounted
 ```
@@ -213,7 +220,7 @@ SOCRadar_ImportAudit_CL
 ```kusto
 // Anything that went wrong in the last day
 SOCRadar_ImportAudit_CL
-| where TimeGenerated > ago(1d) and (error_count > 0 or truncated)
+| where TimeGenerated > ago(1d) and (error_count > 0 or truncated or capped)
 | project TimeGenerated, company_id, source, error_count, truncated
 ```
 

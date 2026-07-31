@@ -206,6 +206,7 @@ def write_audit(conf: dict, audit_results: list):
             "no_address_count": r.get("no_address", 0),
             "lookup_disabled_count": r.get("lookup_disabled", 0),
             "no_token_count":   r.get("no_token", 0),
+            "lookup_failed_count": r.get("lookup_failed", 0),
             "capped":           bool(r.get("capped", False)),
             "truncated":        bool(r.get("truncated", False)),
             "duration_sec":     float(r.get("duration", 0)),
