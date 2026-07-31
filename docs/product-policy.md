@@ -302,6 +302,32 @@ negative result is this project's recurring class of mistake.
 
 ---
 
+## 17. The ruleset value is spelled `standard`, and the old spelling still works
+
+**Decision.** The canonical value of `RulesetMode` / `RULESET_MODE` is
+`standard`. Earlier releases spelled it `standart`, which is Turkish, and this
+repository is in English. Deployments that are already running still send the
+old spelling, so `config.load_former` accepts it and normalises it to
+`standard`. The normalisation lives in that one function and nowhere else — a
+second copy existed in `compose_company`, did nothing observable, and was
+removed rather than left there implying a guarantee it was not providing.
+
+**Why it matters in the workspace.** `ruleset_mode` is written into the
+`SOCRadar_EntraID_Audit_CL` rows. Rows written before this change say
+`standart`; rows written after say `standard`. Nothing broke — a query spanning
+that date simply sees both, and should match on either:
+
+```kusto
+SOCRadar_EntraID_Audit_CL
+| where ruleset_mode in ("standard", "standart")
+```
+
+**Not offered any more.** The portal form and the template only accept
+`standard` and `strict`. The old spelling is accepted from an app setting, not
+handed to anyone new.
+
+---
+
 ## 8. Other constraints settled in writing
 
 | Subject | Decision |

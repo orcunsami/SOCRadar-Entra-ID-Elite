@@ -69,6 +69,7 @@ LEGACY_SPELLING_ALLOWED = {
     "FunctionApp/actions/former_companies.py",
     "FunctionApp/tests/test_config_warnings.py",
     "deploy/main.bicep",
+    "docs/product-policy.md",   # documents the compatibility decision itself
 }
 
 
