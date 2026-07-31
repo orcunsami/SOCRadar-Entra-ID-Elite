@@ -12,8 +12,10 @@ it shows exactly who the next run would add or remove.
 Leaked-credential monitoring is a second, optional capability
 (`EnableLeakMonitoring`, off by default). Each company is searched only in its
 own tenants, `LeakResponse` defaults to `logOnly`, and `LeakMaxActionsPerRun`
-caps how many accounts one run may change. Write permissions are requested only
-for the responses listed in `LeakResponseActions`.
+caps account changes **per company per source** — a run's real maximum is that
+number × companies × enabled sources, not the number by itself. Write
+permissions are requested only for the responses listed in
+`LeakResponseActions`.
 
 ## Files
 
@@ -28,8 +30,11 @@ for the responses listed in `LeakResponseActions`.
 
 The company grid emits `[{companyId, tenantIds, apiKey, actorEmail}]`; the
 template passes it through as the `FORMER_COMPANY_MAP` app setting and the
-engine parses both these names and the snake_case originals. A row without
-an API key or actor email stays plan-only but is still previewed.
+engine parses both these names and the snake_case originals. A row without an
+**actor email** stays plan-only but is still previewed. A row without its **API
+key** is different: real mode needs the key even to read the list, so that
+company shows as an error in the preview until the key or an `api_key_setting`
+reference is added.
 
 ## CLI deploy
 

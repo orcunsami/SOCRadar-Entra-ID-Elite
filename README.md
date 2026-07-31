@@ -21,6 +21,11 @@ for a read-only trial turn off Apply changes in the form (plan-only mode). That
 covers the scheduled sync; `POST /api/former/manual` is a deliberate operator
 override and writes whatever it is given, in either mode.
 
+Leave **Client mode** on *Real*. *Mock* is a development option: it writes the
+former list to a local storage table and never contacts the platform, while the
+run still reports what it "added". It is not the trial — the trial switch is
+Apply changes.
+
 ## Deploy
 
 Portal: use `deploy/azuredeploy.json` with `deploy/createUiDefinition.json`
@@ -32,8 +37,9 @@ A tenant that belongs to the group but has no company of its own on the
 platform, such as a holding tenant, goes in **Other group tenants** instead.
 Its active members are suppressed for every company in the grid; it never
 receives a former list itself. The app has to be consented in each tenant
-listed there, otherwise the snapshot counts as incomplete and removals are
-withheld.
+listed there. Without that the snapshot is incomplete, and an incomplete
+snapshot stops **everything** for that company — no removals and no additions
+either, so nobody gets suppressed until the consent is in place.
 
 Creating a new App Registration (the form's default) needs the
 Application Administrator role in Entra ID. Without it the deployment
@@ -73,11 +79,13 @@ Manual entries survive reconciles until removed with `action: remove`.
   in the platform UI or by other tools are never touched by it. The manual
   endpoint is the exception and removes exactly the addresses you name,
   ownership or not.
-- An incomplete tenant snapshot, the first run, and per-run caps all
-  withhold deletions.
+- The first run and the per-run caps withhold deletions. An incomplete tenant
+  snapshot is stricter than both: it withholds every change for that company,
+  additions included.
 - A data-completeness guard blocks mutation when a tenant read shrinks
-  suspiciously; real shrinkage is confirmed with
-  `FORMER_GUARD_ACCEPT_DROP=true` for one run.
+  suspiciously. To confirm real shrinkage, set `FORMER_GUARD_ACCEPT_DROP=true`,
+  let one run finish, then **remove the setting again** — nothing clears it for
+  you, and while it is set that guard never trips.
 - Timer and manual endpoint are serialized per company with a lease lock.
 - Every action lands in the `SOCRadar_EntraID_Audit_CL` Log Analytics
   table with hashed emails.
@@ -118,11 +126,13 @@ A lookup can also fail outright, with a 403 or a server error. That is not the
 same as coming back empty, so it has its own counter, `lookup_failed_count`,
 and the window is held and read again rather than written off.
 
-Every record the run handled falls into exactly one of `found_count`,
+Every record a **finished** run handled falls into exactly one of `found_count`,
 `not_found_count`, `domain_filtered`, `no_address_count`,
 `lookup_disabled_count`, `no_token_count` and `lookup_failed_count`, and those
-seven add up to `total_records`. If they ever do not, the summary is hiding
-something.
+seven add up to `total_records`. A run that stopped early reports `truncated`
+and legitimately accounts for fewer records than it pulled — the rest are read
+again next time. On a finished, error-free run the parts have to close; if they
+do not, the summary is hiding something.
 
 Safety works the same way as the former sync:
 
@@ -130,10 +140,12 @@ Safety works the same way as the former sync:
   just recorded. Responding is a separate choice.
 - **Each company is searched only in its own tenants.** A finding for one
   company can never trigger a change in another company's directory.
-- **A ceiling per run** (default 50) stops the scheduled run from changing more
-  accounts than usual if a feed suddenly returns far more than it should.
-  Matches keep being recorded. The ceiling covers the schedule; a manual
-  `/api/leak/probe` call acts once, on one address, and is not counted against it.
+- **A ceiling of 50 account changes** (the default) applies **per company per
+  source**, so a single scheduled run can change up to 50 × companies × enabled
+  sources accounts — with three companies and two sources that is 300, not 50.
+  Size it against that number, not against one run. Matches keep being recorded
+  once the ceiling is reached. A manual `/api/leak/probe` call acts once, on one
+  address, and is not counted against it.
 - **Only the responses you pick are requested as permissions.** Leave an action
   unselected and its write permission is never asked for and never runs. Adding
   people to a group is not in that list: it is not a checkbox but a consequence
@@ -164,8 +176,10 @@ the group and re-enabling accounts stay off unless `ENABLE_REMOVE_FROM_GROUP`
 or `ENABLE_ENABLE_ACCOUNT` is set in the app's settings.
 
 Confirming a user as compromised needs Entra ID P1 or P2. Without that licence
-the response is attempted, recorded as `confirm_risky_failed` and retried on a
-later run; nothing else about the run changes.
+the response is attempted and recorded as `confirm_risky_failed`. That finding
+is **not** processed again on a later run — the window moves on regardless. So
+grant the licence, or the permission, before turning the response on rather
+than after.
 
 Because MFA reset cannot be undone, start with Log only and confirm the matches
 look right before turning responses on.
@@ -203,8 +217,11 @@ leak monitoring is off, so read it as a leak-side check only, not as a verdict
 on the install.
 
 **2. Ask about one person.** `POST /api/leak/probe` with an address and a
-company ID says where that person was found and what would happen to them.
-It changes nothing unless you ask it to.
+company ID says where that person was found. It changes nothing unless you ask
+it to. It covers only the two reversible responses — sign-out and password
+change. Disabling an account, resetting MFA and confirming compromise are left
+to the scheduled run, so the probe neither shows nor performs them: an empty
+`would_run` here does not mean the schedule would do nothing.
 
 **3. Read the log.** In the workspace this deployment created:
 
@@ -221,8 +238,9 @@ SOCRadar_ImportAudit_CL
 
 ```kusto
 // Does the summary account for every record it handled?
+// Finished runs only: a truncated or failed run legitimately accounts for less.
 SOCRadar_ImportAudit_CL
-| where TimeGenerated > ago(7d)
+| where TimeGenerated > ago(7d) and not(truncated) and error_count == 0
 | extend accounted = found_count + not_found_count + domain_filtered
                    + no_address_count + lookup_disabled_count + no_token_count
                    + lookup_failed_count
@@ -253,9 +271,11 @@ SOCRadar_EntraID_Audit_CL
 | project TimeGenerated, company_id, added, removed, blocked, block_reason
 ```
 
-A run that found nothing looks the same as a healthy one — except
-`error_count` and `truncated` stay at zero. If either is set, the window was
-not fully read and will be tried again.
+A run that found nothing looks the same as a healthy one — except that on a
+healthy run `error_count`, `lookup_failed_count` and `truncated` are all zero.
+If any of them is set, the window was not fully read and will be tried again.
+`capped` is different: it means the run reached its ceiling, so matches were
+recorded but some accounts were deliberately left for the next run.
 
 **4. Check it against Entra ID's own record.** Every matched row carries
 `entra_user_id`, the account's object ID, which is what Microsoft Entra ID's
@@ -328,14 +348,16 @@ dashboard can show something safe without reading the credential itself.
 | Preview returns 401 | Wrong or missing function key | Copy a key from the Function App's App keys page |
 | A company row shows an API-key error | Key empty or wrong for that company | Add the correct key (or an api_key_setting reference) |
 | Manual add returns 409 | A sync is writing that company right now | Retry in a minute |
-| Adds report success but the platform list stays empty | Actor email does not belong to that company, or a platform-side issue | Verify the actor email; if it is correct, contact support |
+| Adds report success but the platform list stays empty | Client mode is Mock, or the actor email does not belong to that company | Set Client mode to Real; verify the actor email; if both are right, contact support |
+| Nobody is suppressed and `blocked` says `incomplete_snapshot` | A listed tenant has not consented to the app | Consent it there — until then that company gets no additions either |
 
 ## Postman
 
-`postman/` has a collection to check everything from outside Azure: the
-app's preview and manual endpoints, plus the platform API directly (so you
-can verify the former-employee list independently of the app). Import both
-files, fill the environment with your values; keys stay on your machine.
+`postman/` has a collection to check everything from outside Azure: the app's
+preview, manual, leak preview and probe endpoints, plus the platform API
+directly (so you can verify the former-employee list independently of the app).
+Import both files, fill the environment with your values; keys stay on your
+machine.
 
 ## Tests
 
@@ -354,10 +376,11 @@ isolation and wrong in place.
 Before publishing a release, `scripts/release_gate.sh` installs the shipped
 template and package into a throwaway resource group, checks that the app can
 actually reach a tenant, and deletes the group again. It is the only step that
-tests what a customer gets rather than what the repository contains.
+tests what a customer gets rather than what the repository contains; the header
+of that file lists what it does not cover.
 
 ## Decisions that are not in the code
 
-`docs/product-policy.md` records the choices no one can infer by reading the
-source: how the shared version is numbered, how a leaked credential is stored,
-and which questions are still open.
+`docs/product-policy.md` (written in Turkish) records the choices no one can
+infer by reading the source: how the shared version is numbered, how a leaked
+credential is stored, and which questions are still open.
