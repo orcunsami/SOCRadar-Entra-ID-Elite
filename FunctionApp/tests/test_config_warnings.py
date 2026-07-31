@@ -81,21 +81,26 @@ class CredentialIsStoredAsDeliveredTest(unittest.TestCase):
 
 
 class RulesetModeAliasTest(unittest.TestCase):
-    """D1: 'standard' (English) must be treated as 'standart' (Turkish)."""
+    """The canonical spelling is 'standard'. 'standart' shipped in earlier
+    releases and is still the value set in running installations, so it has to
+    keep working — an upgrade must not quietly change what those deployments do.
+    """
 
-    def test_load_former_standard_becomes_standart(self):
-        env = dict(_LOAD_FORMER_ENV, RULESET_MODE="standard")
-        with mock.patch.dict(os.environ, env, clear=True):
-            from utils import config
-            conf = config.load_former()
-        self.assertEqual(conf["ruleset_mode"], "standart")
-
-    def test_load_former_standart_stays_standart(self):
+    def test_load_former_legacy_standart_is_accepted(self):
         env = dict(_LOAD_FORMER_ENV, RULESET_MODE="standart")
         with mock.patch.dict(os.environ, env, clear=True):
             from utils import config
             conf = config.load_former()
-        self.assertEqual(conf["ruleset_mode"], "standart")
+        self.assertEqual(conf["ruleset_mode"], "standard",
+                         "a deployment still set to the old spelling must keep "
+                         "the same behaviour after an upgrade")
+
+    def test_load_former_standard_stays_standard(self):
+        env = dict(_LOAD_FORMER_ENV, RULESET_MODE="standard")
+        with mock.patch.dict(os.environ, env, clear=True):
+            from utils import config
+            conf = config.load_former()
+        self.assertEqual(conf["ruleset_mode"], "standard")
 
     def test_load_former_strict_stays_strict(self):
         env = dict(_LOAD_FORMER_ENV, RULESET_MODE="strict")
@@ -104,15 +109,21 @@ class RulesetModeAliasTest(unittest.TestCase):
             conf = config.load_former()
         self.assertEqual(conf["ruleset_mode"], "strict")
 
-    def test_load_former_default_is_standart(self):
+    def test_load_former_default_is_standard(self):
         env = dict(_LOAD_FORMER_ENV)
         with mock.patch.dict(os.environ, env, clear=True):
             from utils import config
             conf = config.load_former()
-        self.assertEqual(conf["ruleset_mode"], "standart")
+        self.assertEqual(conf["ruleset_mode"], "standard")
 
-    def test_compose_company_standard_same_as_standart(self):
-        """Both spellings must produce the same desired set in compose_company."""
+    def test_the_run_never_sees_the_legacy_spelling(self):
+        """compose_company does no fix-up, so the value reaching it must already
+        be normalised. This is the seam the fix-up used to hide."""
+        env = dict(_LOAD_FORMER_ENV, RULESET_MODE="standart")
+        with mock.patch.dict(os.environ, env, clear=True):
+            from utils import config
+            conf = config.load_former()
+
         row = {"company_id": "330", "own_tenants": ["te330"],
                "api_key": "k", "actor_email": "a@x.com"}
         tenant_data = {
@@ -120,16 +131,18 @@ class RulesetModeAliasTest(unittest.TestCase):
         }
         kw = dict(include_deleted=True, enable_former_sync=True, enable_cross=False)
 
-        desired_standart, stats_standart, _ = compose_company(
-            row, [], tenant_data, ruleset_mode="standart", **kw)
+        # What the timer actually passes: conf["ruleset_mode"], not the raw env.
+        desired_legacy, stats_legacy, _ = compose_company(
+            row, [], tenant_data, ruleset_mode=conf["ruleset_mode"], **kw)
         desired_standard, stats_standard, _ = compose_company(
             row, [], tenant_data, ruleset_mode="standard", **kw)
 
-        self.assertEqual(desired_standart, desired_standard)
-        self.assertEqual(stats_standart["desired"], stats_standard["desired"])
+        self.assertEqual(conf["ruleset_mode"], "standard")
+        self.assertEqual(desired_legacy, desired_standard)
+        self.assertEqual(stats_legacy["desired"], stats_standard["desired"])
 
-    def test_compose_company_strict_differs_from_standart(self):
-        """strict routes disabled users to review, not desired -- different from standart."""
+    def test_compose_company_strict_differs_from_standard(self):
+        """strict routes disabled users to review, not desired -- unlike standard."""
         row = {"company_id": "330", "own_tenants": ["te330"],
                "api_key": "k", "actor_email": "a@x.com"}
         tenant_data = {
@@ -137,14 +150,24 @@ class RulesetModeAliasTest(unittest.TestCase):
         }
         kw = dict(include_deleted=True, enable_former_sync=True, enable_cross=False)
 
-        desired_standart, _, _ = compose_company(
-            row, [], tenant_data, ruleset_mode="standart", **kw)
+        desired_standard, _, _ = compose_company(
+            row, [], tenant_data, ruleset_mode="standard", **kw)
         desired_strict, stats_strict, _ = compose_company(
             row, [], tenant_data, ruleset_mode="strict", **kw)
 
-        self.assertIn("disabled@x.com", desired_standart)
+        self.assertIn("disabled@x.com", desired_standard)
         self.assertNotIn("disabled@x.com", desired_strict)
         self.assertEqual(stats_strict["review_needed"], 1)
+
+    def test_the_template_no_longer_offers_the_old_spelling(self):
+        """New deployments must not be handed the Turkish spelling to pick."""
+        import json
+        from pathlib import Path
+        arm = json.loads((Path(__file__).resolve().parents[2] / "deploy" /
+                          "azuredeploy.json").read_text(encoding="utf-8"))
+        p = arm["parameters"]["RulesetMode"]
+        self.assertEqual(p["allowedValues"], ["standard", "strict"])
+        self.assertEqual(p["defaultValue"], "standard")
 
 
 if __name__ == "__main__":

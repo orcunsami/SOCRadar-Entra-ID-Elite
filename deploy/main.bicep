@@ -49,9 +49,12 @@ param RunOnStartup bool = true
 @description('Include soft-deleted Entra users in the former set (V2).')
 param IncludeDeletedUsers bool = true
 
-@description('standart sends disabled Members to the former list; strict only logs them as review-needed.')
-@allowed(['standart', 'strict'])
-param RulesetMode string = 'standart'
+// 'standart' was the spelling in earlier releases and is still set in running
+// installations. The app accepts it and normalises it, so an upgrade does not
+// change behaviour under them; only new deployments get this spelling.
+@description('standard sends disabled Members to the former list; strict only logs them as review-needed.')
+@allowed(['standard', 'strict'])
+param RulesetMode string = 'standard'
 
 @description('Absolute cap on adds per run per company.')
 param FormerMaxAdds int = 500

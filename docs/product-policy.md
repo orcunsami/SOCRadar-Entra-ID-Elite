@@ -19,7 +19,7 @@ No new tag is cut as the code moves on; the asset on the `v1.0.0` release is
 updated instead:
 
 ```bash
-python3 scripts/build_package.py --out dist/FunctionApp.zip --deps-from <onceki.zip>
+python3 scripts/build_package.py --out dist/FunctionApp.zip --deps-from <previous.zip>
 gh release upload v1.0.0 dist/FunctionApp.zip --clobber
 ```
 
@@ -131,7 +131,7 @@ largest batch the installation will ever see. So the cutoff never reaches the
 window being processed: `min(cutoff, active_window)`.
 
 Verified against a real Azure Table, with the unclamped version reproduced too:
-when the cutoff is not clamped, the active window's record really is deleted.
+when the cutoff is not clamped, the active window's record **really is** deleted.
 
 **UTC.** The cutoff is computed from UTC, not from the host clock. The window
 stamps it compares against are produced from UTC too (`sources/base_fetcher`,

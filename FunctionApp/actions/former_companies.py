@@ -167,9 +167,11 @@ def compose_company(row: dict, group_tenants: list, tenant_data: dict, *,
     an unread GROUP tenant only marks the snapshot incomplete (the planner
     then withholds all mutation for this company).
     """
-    # Accept "standard" as an alias for "standart" (backward compatible)
-    if ruleset_mode == "standard":
-        ruleset_mode = "standart"
+    # No spelling fix-up here on purpose. The only value this function reads is
+    # "strict", so normalising anything else changed nothing observable and read
+    # as a guarantee it was not providing. The legacy "standart" spelling that
+    # running installations still send is normalised once, in config.load_former,
+    # which is where it can be tested.
 
     for tid in row["own_tenants"]:
         entry = tenant_data.get(tid)

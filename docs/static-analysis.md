@@ -12,7 +12,7 @@ reading found?**
 
 ## Result table
 
-| Tool | Findings | Caught of those defects | Verdict |
+| Tool | Findings | Of those defects, caught | Verdict |
 |---|---|---|---|
 | ruff 0.16 | 164 (default) · 2 753 (`--select ALL`) · 2 984 (`ALL --preview`) | **0** | NOT a CI gate |
 | mypy 2.3 | 34 (default) · 255 (`--strict`) | **0** | NOT a CI gate |

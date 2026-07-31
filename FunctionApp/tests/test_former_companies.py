@@ -141,7 +141,7 @@ class EffectiveApplyTests(unittest.TestCase):
 
 class ComposeTests(unittest.TestCase):
 
-    KW = dict(ruleset_mode="standart", include_deleted=True,
+    KW = dict(ruleset_mode="standard", include_deleted=True,
               enable_former_sync=True, enable_cross=True)
     ROW = {"company_id": "330", "own_tenants": ["te330"], "api_key": "k", "actor_email": "a@x.com"}
 

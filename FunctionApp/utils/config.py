@@ -240,9 +240,9 @@ def load_former() -> dict:
         "enable_former_sync":           _bool("ENABLE_FORMER_SYNC", True),
         "enable_cross_tenant_suppress": _bool("ENABLE_CROSS_TENANT_SUPPRESS", True),
         "include_deleted_users":        _bool("INCLUDE_DELETED_USERS", True),
-        # standart: disabled Member without HR signal counts as former (K4a).
+        # standard: disabled Member without HR signal counts as former (K4a).
         # strict:   such records are only logged as review-needed, not sent (K4b).
-        "ruleset_mode": (_get("RULESET_MODE", default="standart") or "standart").lower(),
+        "ruleset_mode": (_get("RULESET_MODE", default="standard") or "standard").lower(),
 
         # SOCRadar former list client — paths per DRP Former Employees API
         # (openapi drp_former_employeeapi.yaml, 2026-07-16).
@@ -292,8 +292,10 @@ def load_former() -> dict:
         "dcr_endpoint":     _get("DCR_ENDPOINT", default=""),
     }
 
-    # Accept "standard" as an alias for "standart" (backward compatible)
+    # "standart" was the canonical spelling in earlier releases and is still the
+    # value set in running installations. Accept it and normalise, so upgrading
+    # to this build does not silently change what those deployments do.
     ruleset_mode = conf_former["ruleset_mode"]
-    conf_former["ruleset_mode"] = (ruleset_mode if ruleset_mode != "standard" else "standart")
+    conf_former["ruleset_mode"] = ("standard" if ruleset_mode == "standart" else ruleset_mode)
 
     return conf_former

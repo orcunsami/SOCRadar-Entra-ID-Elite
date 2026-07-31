@@ -381,6 +381,6 @@ of that file lists what it does not cover.
 
 ## Decisions that are not in the code
 
-`docs/product-policy.md` (written in Turkish) records the choices no one can
-infer by reading the source: how the shared version is numbered, how a leaked
-credential is stored, and which questions are still open.
+`docs/product-policy.md` records the choices no one can infer by reading the
+source: how the shared version is numbered, how a leaked credential is stored,
+and how the retention cutoff is kept away from the window being processed.

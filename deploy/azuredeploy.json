@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.45.15.27210",
-      "templateHash": "12318933821827934356"
+      "templateHash": "7322382484668531613"
     }
   },
   "parameters": {
@@ -122,13 +122,13 @@
     },
     "RulesetMode": {
       "type": "string",
-      "defaultValue": "standart",
+      "defaultValue": "standard",
       "allowedValues": [
-        "standart",
+        "standard",
         "strict"
       ],
       "metadata": {
-        "description": "standart sends disabled Members to the former list; strict only logs them as review-needed."
+        "description": "standard sends disabled Members to the former list; strict only logs them as review-needed."
       }
     },
     "FormerMaxAdds": {
