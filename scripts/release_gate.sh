@@ -78,11 +78,17 @@ cleanup() {
   # must not be able to strand the thing that costs money. Anything missed is
   # swept by the next run's preflight, which also covers a kill -9.
   if [ "${FIC_ADDED_HERE:-0}" = "1" ]; then
-    if az ad app federated-credential delete --id "${GATE_APP_ID:-}" \
-         --federated-credential-id "$FIC_NAME" --yes 2>/dev/null; then
+    # No --yes here: this command does not take one, and passing it made every
+    # delete fail with "unrecognized arguments". With stderr discarded the run
+    # reported "delete it by hand" without ever saying why, so the error is
+    # shown now.
+    local err
+    if err=$(az ad app federated-credential delete --id "${GATE_APP_ID:-}" \
+               --federated-credential-id "$FIC_NAME" 2>&1); then
       pass "removed the federated credential this run added"
     else
-      printf '  \033[31mFAIL\033[0m %s\n' "could not remove $FIC_NAME — delete it from the App Registration by hand"
+      printf '  \033[31mFAIL\033[0m %s\n' "could not remove $FIC_NAME: $(printf '%s' "$err" | head -1)"
+      printf '         delete it from the App Registration by hand\n'
       code=1
     fi
   fi
@@ -133,10 +139,12 @@ STALE=$(az ad app federated-credential list --id "$GATE_APP_ID" \
         --query "[?starts_with(name,'former-elite-gate-')].name" -o tsv 2>/dev/null || echo "")
 if [ -n "$STALE" ]; then
   for s in $STALE; do
-    az ad app federated-credential delete --id "$GATE_APP_ID" \
-      --federated-credential-id "$s" --yes 2>/dev/null \
-      && printf '  \033[33mNOTE\033[0m swept a leftover credential: %s\n' "$s" \
-      || fail "a leftover credential $s could not be removed — do it by hand"
+    if sweep_err=$(az ad app federated-credential delete --id "$GATE_APP_ID" \
+                     --federated-credential-id "$s" 2>&1); then
+      printf '  \033[33mNOTE\033[0m swept a leftover credential: %s\n' "$s"
+    else
+      fail "leftover credential $s could not be removed ($(printf '%s' "$sweep_err" | head -1)) — do it by hand"
+    fi
   done
 else
   pass "no leftover gate credentials on the App Registration"
