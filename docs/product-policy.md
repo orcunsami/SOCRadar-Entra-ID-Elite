@@ -312,15 +312,13 @@ old spelling, so `config.load_former` accepts it and normalises it to
 second copy existed in `compose_company`, did nothing observable, and was
 removed rather than left there implying a guarantee it was not providing.
 
-**Why it matters in the workspace.** `ruleset_mode` is written into the
-`SOCRadar_EntraID_Audit_CL` rows. Rows written before this change say
-`standart`; rows written after say `standard`. Nothing broke — a query spanning
-that date simply sees both, and should match on either:
-
-```kusto
-SOCRadar_EntraID_Audit_CL
-| where ruleset_mode in ("standard", "standart")
-```
+**Where the value is visible.** Only in the `GET /api/former/preview` response,
+which reports the mode a run would use. It is not stored in Log Analytics:
+`build_former_audit_rows` does not carry it and the collection rule does not
+declare it, so no row anywhere records either spelling. An installation still
+set to the old value reports `standard` in that response after this build,
+because the value is normalised before the run sees it. Nothing in a customer's
+workspace changes, and no query needs to match both spellings.
 
 **Not offered any more.** The portal form and the template only accept
 `standard` and `strict`. The old spelling is accepted from an app setting, not

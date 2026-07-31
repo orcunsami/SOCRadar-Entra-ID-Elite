@@ -179,5 +179,46 @@ class TheImportAuditSchemaMatchesWhatIsWritten(unittest.TestCase):
             self.assertIn(column, declared)
 
 
+class TheFormerAuditSchemaMatchesWhatIsWritten(unittest.TestCase):
+    """Same rule for the other table, and the distinction that makes it readable.
+
+    `former_audit.py` builds two things that look alike and are not:
+    `build_former_audit_rows` goes to Log Analytics through the collection rule,
+    so every key it writes must be declared or the rule drops it in silence.
+    `build_preview_payload` is an HTTP response and declares nothing — its keys
+    are supposed to be absent from the rule. Reading the file without that
+    distinction produces a list of "missing columns" that are not missing, and
+    a policy note claiming a value is stored when it is not.
+    """
+
+    def _audit_columns(self):
+        import json
+        doc = json.loads((REPO / "deploy" / "azuredeploy.json").read_text(encoding="utf-8"))
+        return {c["name"] for c in doc["variables"]["auditColumns"]}
+
+    def _keys_of(self, func_name):
+        import ast
+        src = (REPO / "FunctionApp" / "actions" / "former_audit.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        fn = next(n for n in tree.body
+                  if isinstance(n, ast.FunctionDef) and n.name == func_name)
+        return set(re.findall(r'"([a-z_]+)":', ast.get_source_segment(src, fn) or ""))
+
+    def test_every_key_the_audit_row_writes_is_declared(self):
+        missing = sorted(self._keys_of("build_former_audit_rows") - self._audit_columns())
+        self.assertEqual(
+            missing, [],
+            f"written to Log Analytics but not declared, so the rule drops them "
+            f"without saying so: {missing}")
+
+    def test_the_preview_payload_is_not_held_to_that_rule(self):
+        """It never reaches the collection rule, so undeclared keys are correct."""
+        preview_only = self._keys_of("build_preview_payload") - self._audit_columns()
+        self.assertIn("ruleset_mode", preview_only,
+                      "ruleset_mode is reported in the preview response and is not "
+                      "stored; if that ever changes, the policy note in "
+                      "docs/product-policy.md has to change with it")
+
+
 if __name__ == "__main__":
     unittest.main()
