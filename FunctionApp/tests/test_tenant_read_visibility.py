@@ -22,7 +22,7 @@ from actions import law_writer  # noqa: E402
 def _fconf(**over):
     conf = {
         "client_id": "cid", "enable_former_sync": True,
-        "include_deleted_users": True, "socradar_company_id": "132",
+        "include_deleted_users": True, "socradar_company_id": "1",
         "dcr_immutable_id": "rule", "dcr_endpoint": "https://dce.test",
     }
     conf.update(over)
@@ -96,7 +96,7 @@ class WhichCompanyTheEventBelongsTo(unittest.TestCase):
     def test_the_company_is_on_the_row(self):
         row = self._record(_fconf())
         self.assertEqual(
-            row["company_id"], "132",
+            row["company_id"], "1",
             "a multi-company deployment filters this table by company; an empty "
             "value hides exactly the failures being investigated")
 
