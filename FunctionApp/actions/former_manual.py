@@ -61,13 +61,13 @@ class ManualFormerStore:
         return added
 
     def remove(self, emails: list) -> int:
+        # Both key schemes on purpose: a row written before the hash change
+        # must stay removable, or the union in the sync re-adds it forever.
+        from actions.socradar_former import _delete_email_row
         removed = 0
         for email in emails:
-            try:
-                self._table.delete_entity(partition_key=self._company, row_key=_email_row_key(email))
+            if _delete_email_row(self._table, self._company, email):
                 removed += 1
-            except ResourceNotFoundError:
-                pass
         return removed
 
 

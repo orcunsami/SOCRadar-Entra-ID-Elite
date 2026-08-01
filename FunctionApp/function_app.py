@@ -1009,18 +1009,25 @@ def _process_source(source_name: str, conf: dict, credential, tenant_headers_map
     if fetch_failed:
         logger.error("[%s] the feed request failed — holding the checkpoint so the window is read again",
                      source_name.upper())
-    # A capped run deliberately left actions untaken. Advancing the window
-    # retired them for good — the README promised they were "left for the next
-    # run", and until this line nothing made that true. On the re-read the
-    # ledger skips everyone already acted on, so only the remainder spends
-    # budget. MAX_CONSECUTIVE_HOLDS below still bounds a feed that outruns the
-    # ceiling every single run.
-    if capped:
+    # A capped APPLY run deliberately left actions untaken. Advancing the
+    # window retired them for good — the README promised they were "left for
+    # the next run", and until this line nothing made that true. On the re-read
+    # the ledger skips everyone already acted on, so only the remainder spends
+    # budget. Two deliberate exclusions:
+    #   - plan mode: nothing is recorded there, so a re-read replans the same
+    #     people at the same point forever — a hold cannot make progress, it
+    #     can only burn five runs and end in a false "abandoned" event.
+    #   - max_actions == 0: the gate is closed (typo-closed cap included);
+    #     re-reading with a zero budget is the same livelock.
+    # MAX_CONSECUTIVE_HOLDS below still bounds a feed that outruns the ceiling
+    # every single run.
+    capped_hold = capped and apply_mode and max_actions > 0
+    if capped_hold:
         logger.warning("[%s] action ceiling reached — holding the checkpoint so "
                        "the remaining actions get their turn", source_name.upper())
     hold_checkpoint = (truncated or not law_ok or lookup_failures > 0
                        or processing_failures > 0 or no_token > 0 or fetch_failed
-                       or capped)
+                       or capped_hold)
 
     # Holding forever is its own failure: a tenant that keeps erroring would
     # freeze the feed and re-report the same findings every run. After a few
@@ -1275,6 +1282,25 @@ def _former_company_snapshots(fconf: dict, credential,
     for err in row_errors:
         logger.error("[FORMER] company map: %s", err)
     if not rows:
+        # The legacy scalar row exists for installs that never configured a
+        # map. A map that WAS configured but collapsed to zero usable rows
+        # (every row dropped — a contested tenant does exactly that) must not
+        # fall through to it: that would quietly retarget the run at a company
+        # and tenant the operator never named. Configured-but-broken stops here.
+        if str(fconf.get("company_map_raw") or "").strip():
+            logger.error("[FORMER] FORMER_COMPANY_MAP is set but produced no "
+                         "usable rows — refusing the legacy fallback. Errors: %s",
+                         "; ".join(row_errors) or "none")
+            try:
+                law.write_lifecycle_event(
+                    fconf, "former_company_map_invalid",
+                    details=f"map set, 0 usable rows: {'; '.join(row_errors)[:400]}")
+            except Exception as audit_error:
+                logger.error("[FORMER] invalid-map event could not be "
+                             "recorded: %s", audit_error)
+            return {"topology": "invalid-map", "rows": [],
+                    "row_errors": row_errors, "guard_notes": [],
+                    "tripped": [], "snaps": []}
         rows = [companies_api.legacy_row(fconf)]
 
     legacy_group = fconf["group_tenant_ids"]
@@ -1559,6 +1585,16 @@ def former_manual(req: func.HttpRequest) -> func.HttpResponse:
     rows, _row_errors = companies_api.parse_company_map(
         fconf["company_map_raw"], os.environ)
     if not rows:
+        # Same rule as the timer: the legacy scalars are only for installs
+        # with no map at all. This is a WRITE endpoint — falling back here
+        # would accept a mutation and send it with a company id and API key
+        # the operator's map never named.
+        if str(fconf.get("company_map_raw") or "").strip():
+            return func.HttpResponse(
+                _json.dumps({"error": "FORMER_COMPANY_MAP is set but produced "
+                                      "no usable rows; fix the map first",
+                             "row_errors": _row_errors[:10]}),
+                status_code=409, mimetype="application/json")
         rows = [companies_api.legacy_row(fconf)]
 
     req_company = str(body.get("company_id", "")).strip()

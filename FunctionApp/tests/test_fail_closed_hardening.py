@@ -276,14 +276,181 @@ class TheTemplateTextsMatchTheCode(unittest.TestCase):
         role = next(r for r in pool
                     if r.get("type") == "Microsoft.Authorization/roleAssignments"
                     and "de139f84" in json.dumps(r))
-        self.assertIn("condition", role,
-                      "Website Contributor must only exist when the restart "
-                      "script that needs it exists")
+        # Not just "a condition exists" — a hardcoded false would pass that.
+        # The role must live and die with the restart script that needs it.
+        cond = role.get("condition", "")
+        self.assertIn("RunOnStartup", cond)
+        self.assertIn("PackageUri", cond)
+        script = next(r for r in pool
+                      if r.get("type") == "Microsoft.Resources/deploymentScripts"
+                      and "triggerFirstRun" in json.dumps(r.get("name", "")))
+        self.assertEqual(cond, script.get("condition"),
+                         "the role's condition must be exactly the script's")
 
     def test_the_beta_graph_host_is_gone(self):
         src = (REPO / "FunctionApp" / "actions" / "entra_id.py").read_text(encoding="utf-8")
         self.assertNotIn("graph.microsoft.com/beta", src)
         self.assertIn("identityProtection/riskyUsers/confirmCompromised", src)
+
+
+class ACappedPlanRunStillMakesProgress(unittest.TestCase):
+    """The adversarial review of the capped-hold fix: plan mode records
+    nothing in the ledger, so a held window replans the same people at the
+    same point forever — five runs of churn ending in a false 'abandoned'
+    event. Same for a zero cap (the typo-closed gate). Holding is only useful
+    where a re-read can do new work: apply mode with a real budget."""
+
+    def _run(self, mode, cap):
+        import time
+        import function_app as fa
+        conf = {
+            "storage_account_name": "sa", "enable_user_lookup": True,
+            "verified_domains": [], "enable_create_incident": False,
+            "enable_resolve_alarm": False, "socradar_api_key": "k",
+            "socradar_company_id": "1", "entra_action_mode": mode,
+            "entra_max_actions_per_run": cap,
+            "enable_revoke_session": True, "enable_add_to_group": False,
+            "enable_remove_from_group": False, "enable_password_change": False,
+            "enable_disable_account": False, "enable_enable_account": False,
+            "enable_confirm_risky": False,
+            "enable_force_mfa_reregistration": False, "security_group_id": "",
+            "enable_ropc": False, "socradar_base_url": "https://x.example",
+            "initial_lookback_minutes": 43200, "initial_start_date": "",
+            "client_id": "",
+        }
+        rows = [{"email": f"u{i}@x.com"} for i in range(3)]
+        rows[-1]["_checkpoint_update"] = {"last_start_date": "2026-08-02"}
+        saves = []
+        ledger = mock.Mock()
+        ledger.already_applied.return_value = False
+        with mock.patch.object(fa.src_botnet, "fetch", return_value=rows), \
+             mock.patch.object(fa.cp, "load", return_value={}), \
+             mock.patch.object(fa.cp, "save",
+                               side_effect=lambda *a: saves.append(a[-1])), \
+             mock.patch.object(fa.law, "write_records", return_value=True), \
+             mock.patch.object(fa.law, "write_lifecycle_event"), \
+             mock.patch.object(fa.ledger_mod, "ActionLedger", return_value=ledger), \
+             mock.patch.object(fa.entra, "lookup_user",
+                               return_value=({"id": "x", "accountEnabled": True}, 200)), \
+             mock.patch.object(fa.entra, "revoke_sessions", return_value=True):
+            audit = fa._process_source("botnet", conf, None,
+                                       {"t1": {"Authorization": "b"}},
+                                       deadline=time.time() + 3600,
+                                       checkpoint_key="botnet:1")
+        return audit, saves
+
+    def test_plan_mode_advances_despite_the_ceiling(self):
+        audit, saves = self._run("plan", 1)
+        self.assertTrue(audit["capped"])
+        advanced = [s for s in saves if s.get("last_start_date") == "2026-08-02"]
+        self.assertTrue(advanced,
+                        "a plan run cannot make progress by re-reading; "
+                        "holding it is pure churn ending in a false abandon")
+
+    def test_a_zero_cap_advances_too(self):
+        audit, saves = self._run("apply", 0)
+        self.assertTrue(audit["capped"])
+        advanced = [s for s in saves if s.get("last_start_date") == "2026-08-02"]
+        self.assertTrue(advanced,
+                        "a closed gate stays closed on the re-read; "
+                        "holding for it is the same livelock")
+
+
+class ABrokenMapNeverFallsBackToTheLegacyRow(unittest.TestCase):
+    """The contested-tenant drop created a new path: a map whose rows all
+    dropped used to fall through to the legacy scalar row — quietly
+    retargeting the run at a company and tenant the operator never named.
+    Configured-but-broken must stop, not redirect."""
+
+    _CONTESTED = ('[{"companyId":"111","tenantIds":"aaaaaaaa-1111-1111-1111-111111111111","apiKey":"k"},'
+                  ' {"companyId":"222","tenantIds":"aaaaaaaa-1111-1111-1111-111111111111","apiKey":"k"}]')
+
+    def _fconf(self, map_raw):
+        return {
+            "company_map_raw": map_raw, "group_tenant_ids": [],
+            "storage_account_name": "sa", "socradar_company_id": "999",
+            "socradar_api_key": "legacy-key", "former_actor_email": "a@x.com",
+            "own_tenant_ids": ["cccccccc-1111-1111-1111-111111111111"],
+            "former_client_mode": "mock", "former_apply_changes": False,
+            "enable_former_sync": True, "enable_cross_tenant_suppress": True,
+            "include_deleted_users": True, "ruleset_mode": "standard",
+            "former_guard_accept_drop": False, "former_guard_drop_percent": 50,
+            "former_max_adds": 500, "former_max_removals": 100,
+            "former_max_removal_percent": 50, "former_run_on_startup": False,
+        }
+
+    def test_the_timer_path_stops_loudly(self):
+        import function_app as fa
+        events = []
+        with mock.patch.object(fa.law, "write_lifecycle_event",
+                               side_effect=lambda c, e, **k: events.append(e)):
+            run = fa._former_company_snapshots(self._fconf(self._CONTESTED), None,
+                                               persist_baseline=False)
+        self.assertEqual(run["topology"], "invalid-map")
+        self.assertEqual(run["snaps"], [], "no snapshot may run on a broken map")
+        self.assertIn("former_company_map_invalid", events)
+
+    def test_no_map_at_all_still_uses_the_legacy_row(self):
+        import function_app as fa
+        with mock.patch.object(fa, "_prefetch_tenant_data", return_value={}), \
+             mock.patch.object(fa.law, "write_lifecycle_event"):
+            run = fa._former_company_snapshots(self._fconf(""), None,
+                                               persist_baseline=False)
+        self.assertEqual(run["topology"], "legacy")
+
+    def test_the_manual_write_endpoint_refuses(self):
+        import json
+        import function_app as fa
+        req = mock.Mock()
+        req.get_json.return_value = {"action": "add",
+                                     "emails": ["x@y.com"], "company_id": "111"}
+        with mock.patch.object(fa.cfg, "load_former",
+                               return_value=self._fconf(self._CONTESTED)):
+            resp = fa.former_manual(req)
+        self.assertEqual(resp.status_code, 409)
+        body = json.loads(resp.get_body().decode())
+        self.assertIn("no usable rows", body["error"])
+
+
+class ALegacyKeyedRowStaysRemovable(unittest.TestCase):
+    """The hash-key change alone made rows written under the old escape
+    un-deletable: the delete missed, its not-found was swallowed, and the
+    sync's union re-added the address forever. Both key schemes are tried."""
+
+    class _Table:
+        def __init__(self):
+            self.rows = {}
+
+        def upsert_entity(self, entity):
+            self.rows[(entity["PartitionKey"], entity["RowKey"])] = dict(entity)
+
+        def delete_entity(self, partition_key, row_key):
+            from azure.core.exceptions import ResourceNotFoundError
+            try:
+                del self.rows[(partition_key, row_key)]
+            except KeyError:
+                raise ResourceNotFoundError("no row")
+
+    def test_a_row_under_the_old_scheme_is_deleted(self):
+        from actions.socradar_former import (_delete_email_row,
+                                             _legacy_email_row_key)
+        table = self._Table()
+        table.rows[("330", _legacy_email_row_key("leaver@corp.com"))] = {
+            "email": "leaver@corp.com"}
+        self.assertTrue(_delete_email_row(table, "330", "leaver@corp.com"))
+        self.assertEqual(table.rows, {})
+
+    def test_a_row_under_the_new_scheme_is_deleted(self):
+        from actions.socradar_former import _delete_email_row, _email_row_key
+        table = self._Table()
+        table.rows[("330", _email_row_key("leaver@corp.com"))] = {
+            "email": "leaver@corp.com"}
+        self.assertTrue(_delete_email_row(table, "330", "leaver@corp.com"))
+        self.assertEqual(table.rows, {})
+
+    def test_absence_is_reported_as_absence(self):
+        from actions.socradar_former import _delete_email_row
+        self.assertFalse(_delete_email_row(self._Table(), "330", "gone@x.com"))
 
 
 if __name__ == "__main__":

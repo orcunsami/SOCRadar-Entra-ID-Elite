@@ -74,6 +74,7 @@ LEGACY_SPELLING_ALLOWED = {
     "FunctionApp/utils/config.py",
     "FunctionApp/actions/former_companies.py",
     "FunctionApp/tests/test_config_warnings.py",
+    "FunctionApp/tests/test_fail_closed_hardening.py",  # drives the shim too
     "deploy/main.bicep",
     "docs/product-policy.md",   # documents the compatibility decision itself
 }

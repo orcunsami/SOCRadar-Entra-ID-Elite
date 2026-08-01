@@ -34,14 +34,37 @@ MOCK_TABLE = "FormerListMock"
 def _email_row_key(email: str) -> str:
     # Hash, not escape. The old encoding replaced the four characters Table
     # Storage forbids with '_', which is lossy: 'a/b@x' and 'a_b@x' became the
-    # same row, so in mock mode one address could overwrite or delete another.
-    # A digest cannot collide that way and needs no forbidden-character list.
-    # The stored entity keeps the plain email in its own column, so nothing
-    # readable is lost. (Rows written under the old scheme are unaddressable by
-    # the new one — acceptable: only the mock table and the manual store use
-    # this key, and both are transient operator state.)
+    # same row, so one address could overwrite or delete another. A digest
+    # cannot collide that way. The stored entity keeps the plain email in its
+    # own column, so listing (which reads that column) never depended on the
+    # key shape.
     import hashlib
     return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
+
+
+def _legacy_email_row_key(email: str) -> str:
+    # The pre-hash scheme. It has to stay deletable: the manual store is NOT
+    # transient — its rows survive reconciles by design, and an entry written
+    # under this key before the hash change would otherwise be un-removable
+    # (the delete would miss, its ResourceNotFoundError would be swallowed,
+    # and the next sync would re-add the address from the still-visible row —
+    # a suppression nobody could ever lift).
+    return email.replace("/", "_").replace("\\", "_").replace("#", "_").replace("?", "_")
+
+
+def _delete_email_row(table, company: str, email: str) -> bool:
+    """Delete an email's row under whichever key scheme it was written with.
+    Returns True if at least one row actually existed."""
+    from azure.core.exceptions import ResourceNotFoundError as _NotFound
+    deleted = False
+    keys = {_email_row_key(email), _legacy_email_row_key(email)}
+    for key in keys:
+        try:
+            table.delete_entity(partition_key=company, row_key=key)
+            deleted = True
+        except _NotFound:
+            pass
+    return deleted
 
 
 class MockFormerListClient:
@@ -80,11 +103,8 @@ class MockFormerListClient:
     def remove(self, emails: list) -> int:
         removed = 0
         for email in emails:
-            try:
-                self._table.delete_entity(partition_key=self._company, row_key=_email_row_key(email))
+            if _delete_email_row(self._table, self._company, email):
                 removed += 1
-            except ResourceNotFoundError:
-                pass
         return removed
 
 
