@@ -86,7 +86,11 @@ def parse_company_map(raw: str, env: dict) -> tuple:
         seen.add(company_id)
 
         api_key = str(item.get("api_key") or item.get("apiKey") or "").strip()
-        key_setting = str(item.get("api_key_setting") or "").strip()
+        # Both spellings, like every other field here. Accepting apiKey but not
+        # apiKeySetting failed silently: the row kept no key and no reference,
+        # so it passed validation and the company was simply never read.
+        key_setting = str(item.get("api_key_setting")
+                          or item.get("apiKeySetting") or "").strip()
         if not api_key and key_setting:
             api_key = str((env or {}).get(key_setting) or "").strip()
             if not api_key:
