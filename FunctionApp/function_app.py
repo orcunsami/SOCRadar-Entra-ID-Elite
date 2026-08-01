@@ -92,7 +92,7 @@ def socradar_entra_id_import(timer: func.TimerRequest) -> None:
         logger.info("[ENTRA] Config requires %s — %s", permission, reason)
 
     if conf["enable_confirm_risky"]:
-        logger.info("[ENTRA] EnableConfirmRisky also requires Entra ID P1/P2 licensing")
+        logger.info("[ENTRA] EnableConfirmRisky also requires an Entra ID P2 licence")
 
     if not conf["enable_user_lookup"]:
         logger.warning("[ENTRA] EnableUserLookup=false — User.Read.All is optional, but Entra lookup and all Entra-targeted actions will be skipped")
@@ -365,7 +365,8 @@ def leak_probe(req: func.HttpRequest) -> func.HttpResponse:
                     ok = entra.force_password_change(user_id, headers)
                 applied.append(name if ok else f"{name}_failed")
                 if ok:
-                    ledger.record_applied(email, "probe", name, window_date)
+                    _record_applied_safely(ledger, email, "probe", name,
+                                           window_date, applied)
             logger.warning("[LEAK-PROBE] applied %s to %s in tenant %s (company %s)",
                            applied, email, found_tenant, company_id)
             # The probe writes to its own partition, which no timer run cleans.
@@ -527,6 +528,32 @@ def _acquire_tenant_tokens(conf: dict, company_id: str) -> dict:
         logger.error("[ENTRA] company %s: no tenant produced a usable token — Entra actions skipped",
                      company_id)
     return headers
+
+
+def _record_applied_safely(ledger, email: str, source_name: str,
+                           action_name: str, window_date: str, taken: list) -> bool:
+    """A mutation that happened but could not be recorded must not become a
+    mutation that happens twice. Before this, a ledger write that raised after
+    a successful Graph action was counted as a processing failure, which held
+    the window — and the re-read then repeated the action, because the ledger
+    had no memory of it. For an MFA reset that is real harm. So the failure is
+    retried once, then absorbed: the action is tagged `_unrecorded`, the error
+    is logged, and the window is allowed to move on. Skipping a possible retry
+    is the cheaper mistake; repeating an irreversible action is not.
+    """
+    for attempt in (1, 2):
+        try:
+            ledger.record_applied(email, source_name, action_name, window_date)
+            return True
+        except Exception as e:
+            if attempt == 1:
+                continue
+            logger.error(
+                "[LEDGER] %s applied to %s but could NOT be recorded (%s). "
+                "Tagged _unrecorded; if this window is re-read for another "
+                "reason, the action may repeat.", action_name, email, e)
+    taken.append(f"{action_name}_unrecorded")
+    return False
 
 
 def _process_source(source_name: str, conf: dict, credential, tenant_headers_map: dict,
@@ -872,7 +899,8 @@ def _process_source(source_name: str, conf: dict, credential, tenant_headers_map
                 ok = run_action()
                 taken.append(action_name if ok else f"{action_name}_failed")
                 if ok:
-                    ledger.record_applied(email, source_name, action_name, window_date)
+                    _record_applied_safely(ledger, email, source_name,
+                                           action_name, window_date, taken)
 
             if conf["enable_force_mfa_reregistration"]:
                 if apply_mode and ledger.already_applied(email, source_name, "force_mfa_rereg", window_date):
@@ -894,7 +922,8 @@ def _process_source(source_name: str, conf: dict, credential, tenant_headers_map
                         taken.append("force_mfa_rereg_no_permission")
                     elif mfa_result["methods_deleted"] > 0:
                         taken.append("force_mfa_rereg")
-                        ledger.record_applied(email, source_name, "force_mfa_rereg", window_date)
+                        _record_applied_safely(ledger, email, source_name,
+                                               "force_mfa_rereg", window_date, taken)
                     elif mfa_result.get("errors"):
                         taken.append("force_mfa_rereg_failed")
                     else:
@@ -913,7 +942,8 @@ def _process_source(source_name: str, conf: dict, credential, tenant_headers_map
                                               emp.get("severity", "MEDIUM"), credential=credential)
                     taken.append("create_incident" if ok else "create_incident_failed")
                     if ok:
-                        ledger.record_applied(email, source_name, "create_incident", window_date)
+                        _record_applied_safely(ledger, email, source_name,
+                                               "create_incident", window_date, taken)
 
             # Resolve SOCRadar alarm if user found in Entra ID
             alarm_id = emp.get("alarm_id")
@@ -934,7 +964,8 @@ def _process_source(source_name: str, conf: dict, credential, tenant_headers_map
                     )
                     taken.append("resolve_alarm" if ok else "resolve_alarm_failed")
                     if ok:
-                        ledger.record_applied(email, source_name, "resolve_alarm", window_date)
+                        _record_applied_safely(ledger, email, source_name,
+                                               "resolve_alarm", window_date, taken)
 
             emp["actions_taken"] = taken
             emp.pop("_checkpoint_update", None)  # internal key — must not reach LAW
@@ -978,8 +1009,18 @@ def _process_source(source_name: str, conf: dict, credential, tenant_headers_map
     if fetch_failed:
         logger.error("[%s] the feed request failed — holding the checkpoint so the window is read again",
                      source_name.upper())
+    # A capped run deliberately left actions untaken. Advancing the window
+    # retired them for good — the README promised they were "left for the next
+    # run", and until this line nothing made that true. On the re-read the
+    # ledger skips everyone already acted on, so only the remainder spends
+    # budget. MAX_CONSECUTIVE_HOLDS below still bounds a feed that outruns the
+    # ceiling every single run.
+    if capped:
+        logger.warning("[%s] action ceiling reached — holding the checkpoint so "
+                       "the remaining actions get their turn", source_name.upper())
     hold_checkpoint = (truncated or not law_ok or lookup_failures > 0
-                       or processing_failures > 0 or no_token > 0 or fetch_failed)
+                       or processing_failures > 0 or no_token > 0 or fetch_failed
+                       or capped)
 
     # Holding forever is its own failure: a tenant that keeps erroring would
     # freeze the feed and re-report the same findings every run. After a few

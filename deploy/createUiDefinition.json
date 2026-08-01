@@ -122,7 +122,7 @@
             "type": "Microsoft.Common.TextBox",
             "label": "Other group tenants (optional)",
             "placeholder": "00000000-0000-0000-0000-000000000000, ...",
-            "toolTip": "Tenants that belong to the group but have no company of their own on the platform, such as a holding tenant. Their active members are added to every company's former list; they never receive a list themselves. The app must be consented in each of them, otherwise the snapshot counts as incomplete and removals are withheld.",
+            "toolTip": "Tenants that belong to the group but have no company of their own on the platform, such as a holding tenant. Their active members are added to every company's former list; they never receive a list themselves. The app must be consented in each of them — without that the snapshot counts as incomplete and EVERYTHING stops for the affected company, additions included, so nobody gets suppressed until the consent is in place.",
             "constraints": {
               "required": false,
               "regex": "^$|^\\s*[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(\\s*,\\s*[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})*\\s*$",
@@ -385,7 +385,7 @@
             "type": "Microsoft.Common.DropDown",
             "label": "Account changes per run",
             "defaultValue": "Up to 50",
-            "toolTip": "A ceiling for the whole run. Once it is reached the run keeps recording matches but stops changing accounts.",
+            "toolTip": "A ceiling per company per source in each run — with three companies and two sources a single run can change up to six times this number. Once a slot reaches it, matches keep being recorded and the remaining actions get their turn on the next run.",
             "constraints": {
               "allowedValues": [
                 {

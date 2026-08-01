@@ -175,7 +175,7 @@ membership — leave the field empty if that is not what you want. Removing from
 the group and re-enabling accounts stay off unless `ENABLE_REMOVE_FROM_GROUP`
 or `ENABLE_ENABLE_ACCOUNT` is set in the app's settings.
 
-Confirming a user as compromised needs Entra ID P1 or P2. Without that licence
+Confirming a user as compromised needs Entra ID P2. Without that licence
 the response is attempted and recorded as `confirm_risky_failed`. That finding
 is **not** processed again on a later run — the window moves on regardless. So
 grant the licence, or the permission, before turning the response on rather
@@ -274,8 +274,11 @@ SOCRadar_EntraID_Audit_CL
 A run that found nothing looks the same as a healthy one — except that on a
 healthy run `error_count`, `lookup_failed_count` and `truncated` are all zero.
 If any of them is set, the window was not fully read and will be tried again.
-`capped` is different: it means the run reached its ceiling, so matches were
-recorded but some accounts were deliberately left for the next run.
+`capped` also holds the window now: the run reached its ceiling, matches were
+recorded, and the re-read gives the remaining accounts their turn — the ledger
+skips everyone already acted on, so nothing is done twice. A feed that outruns
+the ceiling every single run is bounded the same way as any other hold: after a
+few attempts the window is abandoned with an `import_window_abandoned` event.
 
 **4. Check it against Entra ID's own record.** Every matched row carries
 `entra_user_id`, the account's object ID, which is what Microsoft Entra ID's

@@ -85,38 +85,38 @@ class TestApplyManual(unittest.TestCase):
         self.client = FakeClient()
 
     def test_add_persists_and_pushes(self):
-        r = apply_manual("add", ["Ali@X.com", "ali@x.com", "bozuk-email"], self.store, self.client)
-        self.assertEqual(r["accepted"], ["ali@x.com"])  # lowercase + dedup
-        self.assertEqual(r["invalid"], ["bozuk-email"])
-        self.assertEqual(self.store.data, {"ali@x.com"})
-        self.assertEqual(self.client.listed, {"ali@x.com"})
+        r = apply_manual("add", ["Amy@X.com", "amy@x.com", "not-an-email"], self.store, self.client)
+        self.assertEqual(r["accepted"], ["amy@x.com"])  # lowercase + dedup
+        self.assertEqual(r["invalid"], ["not-an-email"])
+        self.assertEqual(self.store.data, {"amy@x.com"})
+        self.assertEqual(self.client.listed, {"amy@x.com"})
         self.assertEqual(self.client.add_calls[0][1], "manual")  # source tag
 
     def test_manual_entry_survives_reconcile(self):
         # The analyst added it by hand; the formula does NOT want this email
-        apply_manual("add", ["gidici@firma.com"], self.store, self.client)
+        apply_manual("add", ["leaver@corp.com"], self.store, self.client)
         # Timer tick: the formula wants an empty set
         reconcile(set(), self.store, self.client)
         # NO M-CLOBBER: the manual entry stays in the list
-        self.assertIn("gidici@firma.com", self.client.get_list())
+        self.assertIn("leaver@corp.com", self.client.get_list())
 
     def test_without_store_union_would_clobber(self):
         # Contrast test: without the union it would be deleted (proof of the design rationale)
-        self.client.add(["gidici@firma.com"], source="manual")
+        self.client.add(["leaver@corp.com"], source="manual")
         desired = set()  # the formula does not want it, and there is NO manual union
         current = self.client.get_list()
         self.client.remove(sorted(current - desired))
-        self.assertNotIn("gidici@firma.com", self.client.get_list())
+        self.assertNotIn("leaver@corp.com", self.client.get_list())
 
     def test_manual_remove_then_formula_readds(self):
         # The formula wants someone as former, the analyst removed them by hand
         # -> the next tick adds them back
-        formula = {"eski@firma.com"}
+        formula = {"departed@corp.com"}
         reconcile(formula, self.store, self.client)
-        apply_manual("remove", ["eski@firma.com"], self.store, self.client)
-        self.assertNotIn("eski@firma.com", self.client.get_list())
+        apply_manual("remove", ["departed@corp.com"], self.store, self.client)
+        self.assertNotIn("departed@corp.com", self.client.get_list())
         reconcile(formula, self.store, self.client)  # policy wins
-        self.assertIn("eski@firma.com", self.client.get_list())
+        self.assertIn("departed@corp.com", self.client.get_list())
 
     def test_remove_clears_store_and_list(self):
         apply_manual("add", ["a@x.com", "b@x.com"], self.store, self.client)
@@ -166,7 +166,7 @@ class TestApplyManual(unittest.TestCase):
         # Wrong actor email: the SOCRadar push returns 0 but it is written to the store.
         # The note must not LIE, it has to give the retry information.
         failing = FakeClient(push_fails=True)
-        r = apply_manual("add", ["ali@x.com"], self.store, failing)
+        r = apply_manual("add", ["amy@x.com"], self.store, failing)
         self.assertEqual(r["stored"], 1)
         self.assertEqual(r["pushed"], 0)
         self.assertIn("push incomplete", r["note"])
@@ -174,10 +174,10 @@ class TestApplyManual(unittest.TestCase):
         # because it stays in the store, the next reconcile retries the push (self-healing)
         healthy = FakeClient()
         reconcile(set(), self.store, healthy)
-        self.assertIn("ali@x.com", healthy.get_list())
+        self.assertIn("amy@x.com", healthy.get_list())
 
     def test_q6_success_note_unchanged(self):
-        r = apply_manual("add", ["ali@x.com"], self.store, self.client)
+        r = apply_manual("add", ["amy@x.com"], self.store, self.client)
         self.assertIn("added to manual store and SOCRadar list", r["note"])
 
 

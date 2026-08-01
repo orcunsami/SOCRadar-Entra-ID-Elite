@@ -55,6 +55,12 @@ TURKISH_STEMS = [
     "gere" "kir", "yaz" "ilir", "sil" "inir", "ek" "lenir", "dos" "ya",
     "sat" "ir", "ha" "ta", "ku" "ral", "kay" "nak", "su" "rum", "ko" "su",
     "or" "nek", "den" "eme", "ayar" "lar", "say" "fa",
+    # Caught by an external audit in test fixture VALUES (a leaver's address
+    # at a Turkish word for "company", and a broken-email placeholder) that the
+    # letter scan and the then-current stems both missed. Two candidates are
+    # deliberately absent: the words for "old" and "company" collide with
+    # 'eskimo' and 'firmament'.
+    "gid" "ici", "boz" "uk", "cal" "isan", "kis" "iler",
 ]
 TURKISH_WORDS = re.compile(
     r"\b(" + "|".join(TURKISH_STEMS) + r")\w*\b", re.IGNORECASE

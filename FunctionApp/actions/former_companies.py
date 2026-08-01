@@ -104,6 +104,27 @@ def parse_company_map(raw: str, env: dict) -> tuple:
             "actor_email": str(item.get("actor_email") or item.get("actorEmail")
                                or "").strip().lower(),
         })
+
+    # A tenant may belong to exactly one company. Two rows claiming the same
+    # tenant would search one directory for both companies' findings and act in
+    # it for both — the isolation this map exists to enforce, quietly gone. The
+    # portal grid cannot prevent it either (its regex checks each cell's GUID
+    # shape, not uniqueness across rows). Ambiguous ownership cannot be
+    # resolved by picking a winner, so every row touching the shared tenant is
+    # dropped, loudly.
+    tenant_owners = {}
+    for row in rows:
+        for tid in row["own_tenants"]:
+            tenant_owners.setdefault(tid.lower(), []).append(row["company_id"])
+    contested = {tid: owners for tid, owners in tenant_owners.items()
+                 if len(owners) > 1}
+    if contested:
+        dropped = sorted({cid for owners in contested.values() for cid in owners})
+        for tid, owners in sorted(contested.items()):
+            errors.append(f"tenant {tid} is claimed by companies "
+                          f"{', '.join(sorted(owners))} — a tenant can have "
+                          f"only one owner; all of them dropped")
+        rows = [r for r in rows if r["company_id"] not in dropped]
     return rows, errors
 
 

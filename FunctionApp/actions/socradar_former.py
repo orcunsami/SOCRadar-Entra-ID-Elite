@@ -32,9 +32,16 @@ MOCK_TABLE = "FormerListMock"
 
 
 def _email_row_key(email: str) -> str:
-    # Table Storage RowKey forbids '/', '\', '#', '?' — emails may contain none
-    # of these normally, but encode defensively.
-    return email.replace("/", "_").replace("\\", "_").replace("#", "_").replace("?", "_")
+    # Hash, not escape. The old encoding replaced the four characters Table
+    # Storage forbids with '_', which is lossy: 'a/b@x' and 'a_b@x' became the
+    # same row, so in mock mode one address could overwrite or delete another.
+    # A digest cannot collide that way and needs no forbidden-character list.
+    # The stored entity keeps the plain email in its own column, so nothing
+    # readable is lost. (Rows written under the old scheme are unaddressable by
+    # the new one — acceptable: only the mock table and the manual store use
+    # this key, and both are transient operator state.)
+    import hashlib
+    return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
 
 
 class MockFormerListClient:

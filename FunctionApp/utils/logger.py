@@ -26,20 +26,31 @@ class SourceLogger:
         self._src = source.upper()
         self._log = logging.getLogger(f"socradar.entra.{source.lower()}")
 
-    def _fmt(self, msg: str) -> str:
+    def _fmt(self, msg: str, args: tuple) -> str:
+        """Render first, redact the whole line. Redacting only the format
+        string let a secret through whenever it arrived as an argument —
+        `log.error("response: %s", body)` printed the body untouched, which is
+        exactly how an external API's echoed credential would reach App
+        Insights. A failed render falls back to the unformatted pieces rather
+        than losing the log line."""
+        if args:
+            try:
+                msg = str(msg) % args
+            except (TypeError, ValueError):
+                msg = f"{msg} {args!r}"
         return f"[{self._src}] {_redact(msg)}"
 
     def info(self, msg: str, *args):
-        self._log.info(self._fmt(msg), *args)
+        self._log.info(self._fmt(msg, args))
 
     def warning(self, msg: str, *args):
-        self._log.warning(self._fmt(msg), *args)
+        self._log.warning(self._fmt(msg, args))
 
     def error(self, msg: str, *args):
-        self._log.error(self._fmt(msg), *args)
+        self._log.error(self._fmt(msg, args))
 
     def debug(self, msg: str, *args):
-        self._log.debug(self._fmt(msg), *args)
+        self._log.debug(self._fmt(msg, args))
 
     def fetch_start(self, start_epoch: int, page: int = 1):
         self.info(f"Starting fetch. start_epoch={start_epoch}, page={page}")

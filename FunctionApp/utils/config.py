@@ -25,21 +25,34 @@ def _bool(key: str, default: bool = False) -> bool:
         return False
     if val:
         # Several of these switches arm directory mutations and default to on.
-        # A value we do not recognise used to fall through to that default in
-        # silence, so "ENABLE_REVOKE_SESSION=disabled" left the action armed and
-        # the operator with no way to tell. We still cannot guess what was meant
-        # — but nobody should have to guess that we guessed.
+        # A value we do not recognise used to fall through to that default, so
+        # "ENABLE_REVOKE_SESSION=disabled" left the action ARMED with only an
+        # error log to say so. We cannot guess what was meant, but between the
+        # two wrong guesses only one changes somebody's directory: an
+        # unrecognised value now reads as False. Off is the state every switch
+        # here can safely be in.
         _logger.error(
-            "App Setting %s has an unrecognised value; falling back to %s. "
-            "Use true or false.", key, default)
+            "App Setting %s has an unrecognised value %r; treating it as "
+            "false. Use true or false.", key, raw.strip())
+        return False
     return default
 
 
-def _int(key: str, default: int = 0) -> int:
-    try:
-        return int(os.environ.get(key, str(default)))
-    except (ValueError, TypeError):
+def _int(key: str, default: int = 0, on_invalid: int = None) -> int:
+    """on_invalid: what an unparseable value becomes. Caps pass 0 so that a
+    typo in a mutation ceiling closes the gate rather than silently restoring
+    the default (a broken FORMER_MAX_REMOVALS meant 100, not 0)."""
+    raw = os.environ.get(key, "")
+    if not raw.strip():
         return default
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        fallback = default if on_invalid is None else on_invalid
+        _logger.error(
+            "App Setting %s has a non-numeric value %r; using %d.",
+            key, raw.strip(), fallback)
+        return fallback
 
 
 def _list(key: str, default: str = "") -> list:
@@ -131,7 +144,7 @@ def load() -> dict:
         "entra_action_mode": (_get("ENTRA_ACTION_MODE", default="plan") or "plan").lower(),
         # Absolute ceiling per run. A leak feed that suddenly returns thousands of
         # records must not turn into thousands of account mutations.
-        "entra_max_actions_per_run": _int("ENTRA_MAX_ACTIONS_PER_RUN", 50),
+        "entra_max_actions_per_run": _int("ENTRA_MAX_ACTIONS_PER_RUN", 50, on_invalid=0),
         # How long the idempotency ledger keeps a window. Rows older than this
         # cannot be reached by any re-read, so keeping them only grows the
         # table. Floored in action_ledger.cutoff_date, not here, so the floor
@@ -275,9 +288,9 @@ def load_former() -> dict:
         # with real credentials (contrast: the Taegis bridge shipped apply-all;
         # elite is production-blocked, so its safe default is plan-only).
         "former_apply_changes":      _bool("FORMER_APPLY_CHANGES", False),
-        "former_max_adds":           _int("FORMER_MAX_ADDS", 500),
-        "former_max_removals":       _int("FORMER_MAX_REMOVALS", 100),
-        "former_max_removal_percent": _int("FORMER_MAX_REMOVAL_PERCENT", 50),
+        "former_max_adds":           _int("FORMER_MAX_ADDS", 500, on_invalid=0),
+        "former_max_removals":       _int("FORMER_MAX_REMOVALS", 100, on_invalid=0),
+        "former_max_removal_percent": _int("FORMER_MAX_REMOVAL_PERCENT", 50, on_invalid=0),
 
         # Data-completeness guard (actions/former_guard.py): a per-tenant email
         # count dropping to 0 or by more than drop_percent vs the last healthy
@@ -295,7 +308,18 @@ def load_former() -> dict:
     # "standart" was the canonical spelling in earlier releases and is still the
     # value set in running installations. Accept it and normalise, so upgrading
     # to this build does not silently change what those deployments do.
+    # Anything else is a typo, and a typo must not pick the looser mode: an
+    # unknown value used to fall through to standard behaviour (disabled users
+    # sent to the former list). Unknown now reads as strict — log-and-review,
+    # no list writes for those records — until someone fixes the setting.
     ruleset_mode = conf_former["ruleset_mode"]
-    conf_former["ruleset_mode"] = ("standard" if ruleset_mode == "standart" else ruleset_mode)
+    if ruleset_mode == "standart":
+        ruleset_mode = "standard"
+    elif ruleset_mode not in ("standard", "strict"):
+        _logger.error(
+            "RULESET_MODE has an unrecognised value %r; running as 'strict' "
+            "(log-only for disabled users) until it is corrected.", ruleset_mode)
+        ruleset_mode = "strict"
+    conf_former["ruleset_mode"] = ruleset_mode
 
     return conf_former

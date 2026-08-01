@@ -23,7 +23,6 @@ except ImportError:
 logger = logging.getLogger("socradar.entra.graph")
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
-GRAPH_BETA  = "https://graph.microsoft.com/beta"
 LOGIN_URL   = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
 
 # Properties the user lookup has to ask for by name. Graph answers
@@ -315,9 +314,12 @@ def force_password_change(user_id: str, graph_headers: dict) -> bool:
 def confirm_compromised(user_id: str, graph_headers: dict) -> bool:
     """
     Confirm user as compromised in Identity Protection.
-    Requires IdentityRiskyUser.ReadWrite.All + P1/P2 license.
+    Requires IdentityRiskyUser.ReadWrite.All and an Entra ID P2 licence
+    (the riskyUsers API is P2, not P1 — the docs here used to overpromise).
+    The call is on v1.0 now; it lived on beta long after Microsoft shipped
+    it in v1.0, which was a compatibility bet with no upside.
     """
-    url = f"{GRAPH_BETA}/riskyUsers/confirmCompromised"
+    url = f"{GRAPH_BASE}/identityProtection/riskyUsers/confirmCompromised"
     body = {"userIds": [user_id]}
     try:
         resp = _graph_request("POST", url, graph_headers, json=body, timeout=15)

@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.45.15.27210",
-      "templateHash": "7322382484668531613"
+      "templateHash": "11221488281523418953"
     }
   },
   "parameters": {
@@ -205,7 +205,7 @@
       "type": "int",
       "defaultValue": 50,
       "metadata": {
-        "description": "Ceiling on account changes per run. The run stops changing accounts once it is reached."
+        "description": "Ceiling on account changes per company per source in each run — a run with three companies and two sources can change up to six times this number. Once a slot reaches it, matches keep being recorded, the remaining actions wait, and the window is re-read next run."
       }
     },
     "LeakLedgerRetentionDays": {
@@ -1216,7 +1216,7 @@
         "azCliVersion": "2.50.0",
         "retentionInterval": "PT1H",
         "timeout": "PT15M",
-        "scriptContent": "sleep 30 && az functionapp restart --name $FA_NAME --resource-group $RG_NAME && echo restarted",
+        "scriptContent": "set -euo pipefail; sleep 30 && az functionapp restart --name \"$FA_NAME\" --resource-group \"$RG_NAME\" && echo restarted",
         "environmentVariables": [
           {
             "name": "FA_NAME",
@@ -1235,6 +1235,7 @@
       ]
     },
     "faContributorRole": {
+      "condition": "[and(not(empty(parameters('PackageUri'))), parameters('RunOnStartup'))]",
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
       "scope": "[resourceId('Microsoft.Web/sites', variables('functionAppName'))]",

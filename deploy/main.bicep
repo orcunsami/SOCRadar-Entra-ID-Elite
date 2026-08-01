@@ -80,7 +80,7 @@ param LeakResponse string = 'logOnly'
 @allowed(['revokeSessions', 'forcePasswordChange', 'disableAccount', 'resetMfa', 'confirmCompromised'])
 param LeakResponseActions array = ['revokeSessions']
 
-@description('Ceiling on account changes per run. The run stops changing accounts once it is reached.')
+@description('Ceiling on account changes per company per source in each run — a run with three companies and two sources can change up to six times this number. Once a slot reaches it, matches keep being recorded, the remaining actions wait, and the window is re-read next run.')
 param LeakMaxActionsPerRun int = 50
 
 @description('Days the idempotency ledger keeps a window before its rows are removed. Rows older than this cannot be reached by any re-read, so keeping them only grows the table. Values below 30 are raised to 30 by the app.')
@@ -668,7 +668,9 @@ resource triggerFirstRun 'Microsoft.Resources/deploymentScripts@2020-10-01' = if
     azCliVersion: '2.50.0'
     retentionInterval: 'PT1H'
     timeout: 'PT15M'
-    scriptContent: 'sleep 30 && az functionapp restart --name $FA_NAME --resource-group $RG_NAME && echo restarted'
+    // Quoted on purpose: a resource-group name can contain spaces, and an
+    // unquoted expansion would split it into extra CLI arguments.
+    scriptContent: 'set -euo pipefail; sleep 30 && az functionapp restart --name "$FA_NAME" --resource-group "$RG_NAME" && echo restarted'
     environmentVariables: [
       { name: 'FA_NAME', value: functionAppName }
       { name: 'RG_NAME', value: resourceGroup().name }
@@ -677,8 +679,11 @@ resource triggerFirstRun 'Microsoft.Resources/deploymentScripts@2020-10-01' = if
   dependsOn: [functionApp, faContributorRole]
 }
 
-// The restart script (and FIC script) run as the UAMI — it needs rights on the app.
-resource faContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+// The restart script runs as the UAMI, so it needs rights on the app — but
+// only when that script exists. This assignment used to be unconditional, so
+// deployments that never ran the restart still granted the runtime identity a
+// permanent Website Contributor on its own app. Same condition as the script.
+resource faContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(PackageUri) && RunOnStartup) {
   name: guid(functionApp.id, managedIdentity.id, 'WebsiteContributor')
   scope: functionApp
   properties: {
