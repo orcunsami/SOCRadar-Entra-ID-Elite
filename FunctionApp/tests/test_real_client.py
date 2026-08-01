@@ -91,6 +91,38 @@ class TestRealClient(unittest.TestCase):
                                          "message": "'email' should be provided"})
             self.assertEqual(make_client().add(["e1@x.com"], source="s"), 0)
 
+    def test_add_duplicate_rejection_counts_as_done(self):
+        """Observed live (2026-08-01, company 330): re-adding a stored address
+        returns is_success=false with this message. The desired state — address
+        on the list — already holds, so it is done, not an error. Before this,
+        every reconcile after the first successful add logged an ERROR forever,
+        because the list endpoint reads back empty and the add is retried each
+        run. The rejection is also the only readable proof the earlier add
+        landed."""
+        body = {"is_success": False, "response_code": 500,
+                "message": "Employees already in database as former employee!"}
+        with mock.patch("actions.socradar_former.requests.post") as p:
+            p.return_value = _resp(200, body, text=str(body))
+            self.assertEqual(make_client().add(["e1@x.com"], source="s"), 1)
+
+    def test_remove_does_not_get_the_duplicate_leniency(self):
+        """already_ok is an add-side rule; a remove failing with the same text
+        would mean something genuinely wrong."""
+        body = {"is_success": False, "response_code": 500,
+                "message": "Employees already in database as former employee!"}
+        with mock.patch("actions.socradar_former.requests.post") as p:
+            p.return_value = _resp(200, body, text=str(body))
+            self.assertEqual(make_client().remove(["e1@x.com"]), 0)
+
+    def test_actor_rejection_is_still_a_failure(self):
+        """The other observed is_success=false message must stay an error —
+        a wrong actor means nothing was written."""
+        body = {"is_success": False, "response_code": 400,
+                "message": "User does not exist or does not belong to this company!"}
+        with mock.patch("actions.socradar_former.requests.post") as p:
+            p.return_value = _resp(200, body, text=str(body))
+            self.assertEqual(make_client().add(["e1@x.com"], source="s"), 0)
+
     def test_remove_payload(self):
         calls = []
         def fake_post(url, json=None, headers=None, timeout=None):

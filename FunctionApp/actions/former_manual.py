@@ -116,8 +116,14 @@ def apply_manual(action: str, emails: list, store, client) -> dict:
     else:
         result["stored"] = store.remove(clean)
         result["pushed"] = client.remove(clean)
-        result["note"] = ("removed from manual store and SOCRadar list; if the policy formula "
-                          "still classifies an email as former, the next sync re-adds it")
+        # "Removed from the SOCRadar list" would be a claim this code cannot
+        # verify: the platform's delete route has been seen to answer 404 while
+        # the record still exists, and its list endpoint answers data:null for
+        # every path, so there is no readable confirmation either way.
+        result["note"] = ("removed from manual store; removal pushed to SOCRadar, but this "
+                          "platform cannot confirm deletions — verify in the platform UI. "
+                          "If the policy formula still classifies an email as former, the "
+                          "next sync re-adds it")
 
     logger.info("[FORMER-MANUAL] %s: accepted=%d invalid=%d stored=%d pushed=%d",
                 action, len(clean), len(invalid), result["stored"], result["pushed"])

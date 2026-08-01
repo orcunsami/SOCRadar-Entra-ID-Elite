@@ -173,8 +173,16 @@ class RealFormerListClient:
                 emails.add(email)
         return emails
 
+    # The platform's add endpoint rejects a duplicate with is_success=false and
+    # this message (observed live, 2026-08-01, company 330). The state we were
+    # asked to reach — address on the list — already holds, so it counts as
+    # done, exactly like a 404 on delete. Without this, every reconcile after
+    # the first successful add logged an ERROR forever, because the list
+    # endpoint reads back empty and the add is retried each run.
+    _ALREADY_PRESENT = "already in database"
+
     def _post_batched(self, path: str, payload_fn, emails: list, missing_ok: bool = False,
-                      dedup_on_retry: bool = False) -> int:
+                      already_ok: bool = False, dedup_on_retry: bool = False) -> int:
         done = 0
         for i in range(0, len(emails), self._batch):
             chunk_box = [emails[i:i + self._batch]]
@@ -210,9 +218,25 @@ class RealFormerListClient:
             if resp.status_code == 200 and self._body_ok(resp):
                 done += len(chunk)
             elif missing_ok and resp.status_code == 404:
-                # delete: no matching active former employees — HTML body, not
-                # JSON. Desired state (absent) already holds; count as done.
-                logger.warning("[FORMER] POST %s: no matching records (404), treating as removed", path)
+                # delete: HTML 404. Originally read as "no matching entry", but
+                # observed live (2026-08-01, company 330): the delete route can
+                # 404 while the record demonstrably exists — the add endpoint
+                # still rejects it as a duplicate afterwards. A 404 therefore
+                # proves nothing about the record. Counting it done keeps
+                # reconciles from wedging, but the removal is UNVERIFIED and the
+                # platform UI is the only place that can confirm it.
+                logger.warning("[FORMER] POST %s: 404 — treated as removed, but this "
+                               "platform can 404 while the record still exists; "
+                               "verify removals in the platform UI", path)
+                done += len(chunk)
+            elif (already_ok and resp.status_code == 200
+                  and self._ALREADY_PRESENT in resp.text):
+                # add: the platform says the address is already a former
+                # employee. Desired state (present) already holds; count as
+                # done. This is also the only readable confirmation this API
+                # gives that an earlier add landed — its list endpoint answers
+                # data:null for every path.
+                logger.info("[FORMER] POST %s: already on the list, treating as added", path)
                 done += len(chunk)
             else:
                 logger.error("[FORMER] POST %s failed: %d %s", path, resp.status_code, resp.text[:200])
@@ -223,6 +247,7 @@ class RealFormerListClient:
             self._add_path,
             lambda chunk: {"formerEmployees": chunk, "comment": source, "email": self._actor},
             emails,
+            already_ok=True,      # a duplicate rejection means the state holds
             dedup_on_retry=True,  # adversary 2026-07-25: server-side add
                                   # idempotency is unproven; never blind-re-POST
         )
