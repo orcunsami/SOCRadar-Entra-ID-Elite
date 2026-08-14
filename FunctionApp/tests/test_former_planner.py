@@ -260,5 +260,63 @@ class ExecutePlanWiringTests(unittest.TestCase):
         self.assertEqual(store.owned_among(["ghost@x.com"]), set())
 
 
+class BlindReadbackTests(unittest.TestCase):
+    """A list endpoint that answers HTTP 200 / is_success / data:null passes the
+    body check and raises nothing, so the readback looks healthy while seeing
+    nothing. Production hit this on 2026-08-01: adds committed, list came back
+    empty, added=0 was recorded, and the entries stayed published unowned."""
+
+    class BlindClient(FakeFormerClient):
+        """Accepts writes, then reports an empty list without raising."""
+
+        def get_list(self):
+            return set()
+
+    def test_empty_add_readback_is_unconfirmed_not_zero(self):
+        store = InMemoryOwnershipStore()
+        client = self.BlindClient()
+        p = plan_former_reconcile(
+            desired={"a@x.com", "b@x.com"}, current=set(), owned=set(),
+            snapshot_complete=True, is_bootstrap=True)
+        r = execute_former_plan(p, client, store, apply_changes=True)
+        self.assertEqual(r["unconfirmed_adds"], 2)
+        self.assertIn("empty list", r["unconfirmed_reason"])
+        self.assertEqual(r["added"], 0)
+        # the uncertainty must not turn into a false ownership claim either
+        self.assertEqual(store.owned_among(["a@x.com", "b@x.com"]), set())
+
+    def test_empty_remove_readback_does_not_tombstone(self):
+        # keep@ is external and must survive; ours@ is the removal candidate.
+        # A blind list makes BOTH look gone -- the tombstone would hand ours@
+        # to nobody, so the run must report unconfirmed instead.
+        store = InMemoryOwnershipStore(seed_owned=["ours@x.com"])
+        client = self.BlindClient(seed=["ours@x.com", "keep@x.com"])
+        p = plan_former_reconcile(
+            desired=set(), current={"ours@x.com", "keep@x.com"},
+            owned={"ours@x.com"}, snapshot_complete=True, is_bootstrap=False,
+            max_removals=100)
+        self.assertEqual(p.remove, ["ours@x.com"])
+        self.assertEqual(p.preserve, ["keep@x.com"])
+        r = execute_former_plan(p, client, store, apply_changes=True)
+        self.assertEqual(r["unconfirmed_removes"], 1)
+        self.assertIn("empty list", r["unconfirmed_reason"])
+        self.assertEqual(r["removed"], 0)
+        # still owned -> the next healthy run retries the removal
+        self.assertEqual(store.owned_among(["ours@x.com"]), {"ours@x.com"})
+
+    def test_genuinely_empty_list_still_confirms_a_real_add(self):
+        # Guard against over-correcting: an empty list is normal on a first run.
+        # A truthful client shows the add, so this must stay a clean confirm.
+        store = InMemoryOwnershipStore()
+        client = FakeFormerClient()
+        p = plan_former_reconcile(
+            desired={"a@x.com"}, current=set(), owned=set(),
+            snapshot_complete=True, is_bootstrap=True)
+        r = execute_former_plan(p, client, store, apply_changes=True)
+        self.assertNotIn("unconfirmed_adds", r)
+        self.assertEqual(r["added"], 1)
+        self.assertEqual(store.owned_among(["a@x.com"]), {"a@x.com"})
+
+
 if __name__ == "__main__":
     unittest.main()

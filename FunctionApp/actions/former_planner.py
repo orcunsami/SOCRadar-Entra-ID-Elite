@@ -170,6 +170,16 @@ def execute_former_plan(plan, client, ownership, apply_changes: bool, source: st
             result["applied"] = True
             return result
         confirmed = [e for e in plan.add if e in after_add]
+        # An empty readback right after a committed add is not evidence the add
+        # was dropped: a list endpoint that has gone blind answers "success,
+        # nothing here" in exactly the same shape. Both readings stay possible,
+        # so record the uncertainty rather than writing added=0 and leaving an
+        # entry published that the ledger will never claim.
+        if not confirmed and not after_add:
+            result["unconfirmed_adds"] = len(plan.add)
+            result["unconfirmed_reason"] = "add readback returned an empty list"
+            result["applied"] = True
+            return result
         ownership.mark_owned(confirmed)
         result["added"] = len(confirmed)
 
@@ -183,6 +193,16 @@ def execute_former_plan(plan, client, ownership, apply_changes: bool, source: st
             # next run re-attempts the removal. Say so instead of reporting zero.
             result["unconfirmed_removes"] = len(plan.remove)
             result["unconfirmed_reason"] = f"remove readback failed: {str(e)[:200]}"
+            result["applied"] = True
+            return result
+        # Absence is what confirms a removal, so a blind list confirms every one
+        # of them and tombstones entries that are still published -- the ledger
+        # then stops treating them as ours and nobody retires them. The entries
+        # we meant to keep are the control: if not one of them came back, trust
+        # the list over the diff.
+        if plan.preserve and not after_remove:
+            result["unconfirmed_removes"] = len(plan.remove)
+            result["unconfirmed_reason"] = "remove readback returned an empty list"
             result["applied"] = True
             return result
         confirmed = [e for e in plan.remove if e not in after_remove]
