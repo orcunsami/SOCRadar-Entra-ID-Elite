@@ -56,9 +56,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install bicep
+        working-directory: deploy
         # az downloads it on first use; doing it as its own step means a
         # download failure says so instead of surfacing as "template is stale".
-        run: az bicep install
+        # The version is pinned to whatever compiled the committed template.
+        # Unpinned, every new bicep release restamps _generator and templateHash
+        # and the next step fails with nobody having touched a template -- which
+        # is how this job spent a week red, and regenerating only resets the
+        # clock until the release after that.
+        run: |
+          PIN=$(python3 -c "import json;print(json.load(open('azuredeploy.json'))['metadata']['_generator']['version'].rsplit('.',1)[0])")
+          echo "pinning bicep to v${PIN} (read from azuredeploy.json)"
+          az bicep install --version "v${PIN}"
 
       - name: azuredeploy.json must match main.bicep
         working-directory: deploy
