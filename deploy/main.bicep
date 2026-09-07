@@ -107,6 +107,9 @@ param VerifiedDomains string = ''
 // asset behind it is what moves.
 param PackageUri string = 'https://github.com/orcunsami/SOCRadar-Entra-ID-Elite/releases/download/v1.0.0/FunctionApp.zip'
 
+@description('Set automatically. Forces the package push to run again on a redeploy, which would otherwise reset WEBSITE_RUN_FROM_PACKAGE and leave the app with no code.')
+param _packagePushTimestamp string = utcNow()
+
 var location = resourceGroup().location
 var suffix = uniqueString(resourceGroup().id)
 var functionAppName = 'former-elite-${suffix}'
@@ -571,7 +574,13 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'python' }
         { name: 'AzureWebJobsFeatureFlags', value: 'EnableWorkerIndexing' }
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: reference(appInsights.id, '2020-02-02').ConnectionString }
-        { name: 'WEBSITE_RUN_FROM_PACKAGE', value: empty(PackageUri) ? '1' : PackageUri }
+        // Always '1', never the release URL. Azure rejects the CREATE of a Linux
+        // consumption Function App whose WEBSITE_RUN_FROM_PACKAGE is a URL that
+        // redirects, and a GitHub release download URL always redirects. Measured
+        // 7 Sep 2026: the same URL was accepted at 15:01 and rejected at 15:10, same
+        // subscription, same region, nothing in this repo changed in between. The
+        // package now arrives through the zip deploy in packagePush below.
+        { name: 'WEBSITE_RUN_FROM_PACKAGE', value: '1' }
         // Former sync (the elite feature)
         { name: 'FORMER_COMPANY_MAP', value: string(FormerCompanies.rows) }
         { name: 'SOCRADAR_BASE_URL', value: socradarBaseUrl }
@@ -656,7 +665,15 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
 }
 
 // First run: restart after package mount so the startup sync fires promptly.
-resource triggerFirstRun 'Microsoft.Resources/deploymentScripts@2020-10-01' = if (!empty(PackageUri) && RunOnStartup) {
+// The package push, and the app has no code without it. This used to be a plain
+// restart: the app was created pointing at PackageUri and the platform fetched it.
+// That is no longer allowed for a redirecting URL, so the zip arrives here instead.
+//
+// The condition dropped RunOnStartup on purpose. Before, RunOnStartup=false only
+// meant "do not force a first run" and the app still had its code from the URL.
+// With WEBSITE_RUN_FROM_PACKAGE='1' the app starts empty, so skipping this step
+// would leave a green deployment with zero functions.
+resource packagePush 'Microsoft.Resources/deploymentScripts@2020-10-01' = if (!empty(PackageUri)) {
   name: 'triggerFirstRun-${suffix}'
   location: location
   kind: 'AzureCLI'
@@ -667,23 +684,34 @@ resource triggerFirstRun 'Microsoft.Resources/deploymentScripts@2020-10-01' = if
   properties: {
     azCliVersion: '2.50.0'
     retentionInterval: 'PT1H'
-    timeout: 'PT15M'
+    timeout: 'PT30M'
+    cleanupPreference: 'OnSuccess'
+    // Without this, a redeploy PUTs the site with the full appSettings list, which
+    // resets WEBSITE_RUN_FROM_PACKAGE from the blob URL config-zip wrote back to
+    // '1', while this script -- unchanged -- does not re-run. The deployment reports
+    // Succeeded and the app is left with no package at all.
+    forceUpdateTag: _packagePushTimestamp
     // Quoted on purpose: a resource-group name can contain spaces, and an
     // unquoted expansion would split it into extra CLI arguments.
-    scriptContent: 'set -euo pipefail; sleep 30 && az functionapp restart --name "$FA_NAME" --resource-group "$RG_NAME" && echo restarted'
+    // unzip -t matters: a 404 or an HTML error page is still a file, and pushing
+    // one yields an app that reports Running and indexes nothing.
+    scriptContent: 'set -e; code=$(curl -s -o /dev/null -w \'%{http_code}\' -L "$PACKAGE_URL"); [ "$code" = 200 ] || { echo "package URL returned HTTP $code"; exit 1; }; curl -sSL -o /tmp/package.zip "$PACKAGE_URL"; python3 -c "import zipfile;zipfile.ZipFile(\'/tmp/package.zip\').testzip()" >/dev/null 2>&1 || { echo \'downloaded package is not a readable zip\'; exit 1; }; echo "package downloaded: $(stat -c%s /tmp/package.zip) bytes"; echo \'reading the app storage connection while the role assignment propagates\'; CONN=; for wait in $(seq 1 8); do CONN=$(az functionapp config appsettings list --name "$FA_NAME" --resource-group "$RG_NAME" --query "[?name==\'AzureWebJobsStorage\'].value" -o tsv 2>/dev/null || true); [ -n "$CONN" ] && break; echo "attempt $wait: the app settings are not readable yet"; sleep 15; done; [ -n "$CONN" ] || { echo \'the app settings stayed unreadable for two minutes: the Website Contributor assignment never became effective\'; exit 1; }; SA=$(printf \'%s\' "$CONN" | sed -n \'s/.*AccountName=\\([^;]*\\).*/\\1/p\'); [ -n "$SA" ] || { echo \'the app storage connection carries no AccountName\'; exit 1; }; echo "staging the package in the app storage account $SA"; pointer() { az functionapp config appsettings list --name "$FA_NAME" --resource-group "$RG_NAME" --query "[?name==\'WEBSITE_RUN_FROM_PACKAGE\'].value" -o tsv 2>/dev/null; }; shape() { case "$(pointer)" in *function-releases*) echo blob;; 1) echo one;; \'\') echo missing;; *) echo other;; esac; }; staged() { [ "$(shape)" = blob ]; }; count() { az rest --method get --url "https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/$RG_NAME/providers/Microsoft.Web/sites/$FA_NAME/functions?api-version=2023-12-01" --query \'length(value)\' -o tsv 2>/dev/null || echo 0; }; indexed() { n=$(count); case "$n" in \'\'|*[!0-9]*) return 1;; esac; [ "$n" -ge 1 ]; }; BLOB=package-$(date -u +%Y%m%d%H%M%S).zip; for attempt in $(seq 1 6); do az storage container create --name function-releases --connection-string "$CONN" -o none >/dev/null 2>&1 || true; if az storage blob upload --container-name function-releases --name "$BLOB" --file /tmp/package.zip --overwrite --connection-string "$CONN" -o none >/dev/null 2>&1; then SAS=$(az storage blob generate-sas --container-name function-releases --name "$BLOB" --permissions r --expiry 2099-12-31T00:00:00Z --connection-string "$CONN" -o tsv 2>/dev/null); { [ -n "$SAS" ] && az functionapp config appsettings set --name "$FA_NAME" --resource-group "$RG_NAME" --settings "WEBSITE_RUN_FROM_PACKAGE=https://$SA.blob.core.windows.net/function-releases/$BLOB?$SAS" -o none >/dev/null 2>&1; } || echo "attempt $attempt: no read token was issued for the staged package"; else echo "attempt $attempt: the package upload failed; the readings decide"; fi; echo "attempt $attempt: pointer=$(shape) functions=$(count)"; staged && break; sleep 30; done; staged || { echo \'the package pointer never became a blob under function-releases: the app would have no code to reload\'; exit 1; }; echo \'restarting the app so the host reloads the staged package\'; az functionapp restart --name "$FA_NAME" --resource-group "$RG_NAME" -o none >/dev/null 2>&1 || echo \'the restart call did not go through; the readings decide\'; for i in $(seq 1 40); do sleep 15; indexed && { echo "$(count) function(s) indexed after $((i * 15))s; run_on_startup triggers the first import"; exit 0; }; done; echo \'the package is staged but no function was indexed in 10 minutes\'; exit 1'
     environmentVariables: [
       { name: 'FA_NAME', value: functionAppName }
       { name: 'RG_NAME', value: resourceGroup().name }
+      { name: 'SUB_ID', value: subscription().subscriptionId }
+      { name: 'PACKAGE_URL', value: PackageUri }
     ]
   }
   dependsOn: [functionApp, faContributorRole]
 }
 
-// The restart script runs as the UAMI, so it needs rights on the app — but
-// only when that script exists. This assignment used to be unconditional, so
-// deployments that never ran the restart still granted the runtime identity a
-// permanent Website Contributor on its own app. Same condition as the script.
-resource faContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(PackageUri) && RunOnStartup) {
+// The push script runs as the UAMI, so it needs rights on the app — but only
+// when that script exists. This assignment used to be unconditional, so
+// deployments that never pushed still granted the runtime identity a permanent
+// Website Contributor on its own app. Same condition as the script; config-zip
+// fetches publishing credentials through ARM and cannot work without it.
+resource faContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(PackageUri)) {
   name: guid(functionApp.id, managedIdentity.id, 'WebsiteContributor')
   scope: functionApp
   properties: {

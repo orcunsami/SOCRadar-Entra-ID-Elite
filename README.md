@@ -49,6 +49,47 @@ exact command).
 
 CLI: see `deploy/README.md`.
 
+## How the code gets there
+
+The template creates the Function App empty (`WEBSITE_RUN_FROM_PACKAGE=1`) and a deployment
+script downloads `PackageUri`, verifies it is a readable zip, uploads it to the storage account
+this template creates, and points the app at that blob with a read-only token. Azure stopped
+accepting the creation of a Linux consumption Function App whose `WEBSITE_RUN_FROM_PACKAGE` is
+a URL that redirects, and a GitHub release download URL always redirects.
+
+Two consequences worth knowing:
+
+- **An installation keeps the package it was installed with.** The release URL is read once, at
+  install time; a later release does not reach an existing installation. Redeploy to pick it up.
+  Before September 2026 the app read that URL on every cold start, so a new release arrived on
+  its own.
+- `RunOnStartup=false` no longer means "no code push". It only controls whether the first import
+  runs immediately. The package is pushed either way, because with `WEBSITE_RUN_FROM_PACKAGE=1`
+  the app starts empty.
+
+If the deployment fails at `triggerFirstRun`, the message says which step: an unreachable
+package URL, a download that is not a readable zip, a package that never reached the container
+the app reloads from, or an app that indexed no function within the poll window. The script
+retries the settings read until its role assignment is effective, retries the upload up to
+six times, and restarts the app once the package is staged -- writing the pointer alone was
+measured not to make the host reload it. If the deployment fails, the diagnostic container
+and its storage account stay in the resource group so the log can be read; delete them
+afterwards.
+
+It reports success only when both readings agree: the package pointer names a blob in the
+`function-releases` container **and** the app has indexed a function. The count alone is not
+enough -- an app whose package was staged somewhere else keeps reporting a function to Azure
+Resource Manager while its host answers 503 from the next restart onwards.
+
+A redeploy rewrites the package pointer, so it has to push again. If every attempt fails there,
+the deployment reports a failure **and the app is left with no code** -- it does not keep
+serving the package it had. Recovery does not need a rebuild: the previous package is still in
+the `function-releases` container of the app's storage account, and pointing
+`WEBSITE_RUN_FROM_PACKAGE` back at that blob brings the app back while you retry.
+Rotating the storage account keys invalidates the read token inside that pointer, so the app
+loses its code at the next restart -- issue a new token for the same blob and write the
+pointer back.
+
 ## First run
 
 Want to see the plan before it writes? Deploy with Apply changes off. The exact URL is in the

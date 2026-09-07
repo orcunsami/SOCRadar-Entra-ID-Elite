@@ -298,10 +298,16 @@ class TheTemplateTextsMatchTheCode(unittest.TestCase):
                     if r.get("type") == "Microsoft.Authorization/roleAssignments"
                     and "de139f84" in json.dumps(r))
         # Not just "a condition exists" — a hardcoded false would pass that.
-        # The role must live and die with the restart script that needs it.
+        # The role must live and die with the script that needs it.
         cond = role.get("condition", "")
-        self.assertIn("RunOnStartup", cond)
         self.assertIn("PackageUri", cond)
+        # This used to assert RunOnStartup was in the condition, which was right while
+        # the script only restarted an app that fetched its own package from a URL.
+        # Azure now rejects creating a Linux consumption Function App with a
+        # redirecting WEBSITE_RUN_FROM_PACKAGE, so the app is created empty and that
+        # script is what puts the code there. Gating it on RunOnStartup would leave a
+        # RunOnStartup=false deployment green and with zero functions.
+        self.assertNotIn("RunOnStartup", cond)
         script = next(r for r in pool
                       if r.get("type") == "Microsoft.Resources/deploymentScripts"
                       and "triggerFirstRun" in json.dumps(r.get("name", "")))
