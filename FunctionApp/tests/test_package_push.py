@@ -69,6 +69,40 @@ class PackagePush(unittest.TestCase):
                 if r.get("type") == "Microsoft.Resources/deploymentScripts"
                 and "package" in json.dumps(r.get("properties", {})).lower()]
 
+    def test_every_deployment_script_keeps_its_failed_log_for_a_day(self):
+        """Two settings, one promise. `cleanupPreference` says WHEN the container
+        and its log are deleted, `retentionInterval` says HOW LONG AFTER. With
+        OnSuccess alone and PT1H a failed customer deployment loses its evidence
+        in an hour -- measured on run 3c6f: endTime 18:42:05, expirationTime
+        19:42:05. The ceiling is documented as 26 hours, and Azure normalises
+        PT26H to P1DT2H (measured live 7 Sep on rg-feeds-paths-b17d).
+
+        This covers EVERY deploymentScript, not just the package push: the FIC
+        script had no cleanupPreference at all, so its log was deleted the moment
+        it failed -- and that is the step a customer without App Registration
+        rights hits first.
+        """
+        all_scripts = [r for r in self.resources
+                       if r.get("type") == "Microsoft.Resources/deploymentScripts"]
+        self.assertTrue(all_scripts, "no deploymentScript in the template")
+        for r in all_scripts:
+            props = r.get("properties", {})
+            name = r.get("name", "?")
+            self.assertEqual(
+                props.get("cleanupPreference"), "OnSuccess",
+                "%s: cleanupPreference is %r - the default deletes the container and its "
+                "log the moment a customer's deployment fails"
+                % (name, props.get("cleanupPreference")),
+            )
+            ri = str(props.get("retentionInterval") or "")
+            m = re.match(r"^P(?:(\d+)D)?(?:T(\d+)H)?$", ri)
+            hours = (int(m.group(1) or 0) * 24 + int(m.group(2) or 0)) if m else 0
+            self.assertGreaterEqual(
+                hours, 26,
+                "%s: retentionInterval is %r - the failed run's container, storage and "
+                "script resource are deleted together when it expires" % (name, ri),
+            )
+
     def test_run_from_package_is_one_not_a_url(self):
         for site in self._sites():
             settings = {a.get("name"): a.get("value") for a in

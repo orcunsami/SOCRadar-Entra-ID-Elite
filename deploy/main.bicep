@@ -229,7 +229,8 @@ resource addFicToExistingApp 'Microsoft.Resources/deploymentScripts@2020-10-01' 
   }
   properties: {
     azCliVersion: '2.50.0'
-    retentionInterval: 'PT1H'
+    retentionInterval: 'PT26H'
+    cleanupPreference: 'OnSuccess'
     timeout: 'PT5M'
     environmentVariables: [
       { name: 'APP_ID', value: EntraIdClientId }
@@ -683,9 +684,9 @@ resource packagePush 'Microsoft.Resources/deploymentScripts@2020-10-01' = if (!e
   }
   properties: {
     azCliVersion: '2.50.0'
-    retentionInterval: 'PT1H'
-    timeout: 'PT30M'
+    retentionInterval: 'PT26H'
     cleanupPreference: 'OnSuccess'
+    timeout: 'PT30M'
     // Without this, a redeploy PUTs the site with the full appSettings list, which
     // resets WEBSITE_RUN_FROM_PACKAGE from the blob URL config-zip wrote back to
     // '1', while this script -- unchanged -- does not re-run. The deployment reports
