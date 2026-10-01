@@ -43,7 +43,7 @@ param FormerClientMode string = 'real'
 @allowed([5, 10, 15, 30, 60, 120, 240, 360, 720, 1440])
 param FormerSyncIntervalMinutes int = 60
 
-@description('Run the first former sync right after deployment.')
+@description('Fire both timers at every host start, not only once after deployment: a restart, a scale-out and a wake-up after idle each trigger a run. Microsoft advises against this in production; see docs/product-policy.md section 3.')
 param RunOnStartup bool = true
 
 @description('Include soft-deleted Entra users in the former set (V2).')
@@ -57,12 +57,18 @@ param IncludeDeletedUsers bool = true
 param RulesetMode string = 'standard'
 
 @description('Absolute cap on adds per run per company.')
+@minValue(0)
+@maxValue(100000)
 param FormerMaxAdds int = 500
 
 @description('Absolute cap on removals per run per company.')
+@minValue(0)
+@maxValue(100000)
 param FormerMaxRemovals int = 100
 
 @description('Removals may not exceed this percentage of the remote list.')
+@minValue(0)
+@maxValue(100)
 param FormerMaxRemovalPercent int = 50
 
 @description('Also monitor leaked credentials. Each company row is checked against its own tenants only.')
@@ -85,6 +91,7 @@ param LeakMaxActionsPerRun int = 50
 
 @description('Days the idempotency ledger keeps a window before its rows are removed. Rows older than this cannot be reached by any re-read, so keeping them only grows the table. Values below 30 are raised to 30 by the app.')
 @minValue(30)
+@maxValue(3650)
 param LeakLedgerRetentionDays int = 90
 
 @description('Hours between leak import runs.')
@@ -622,8 +629,9 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'INITIAL_LOOKBACK_MINUTES', value: string(LeakInitialLookbackDays * 1440) }
         // Every action switch is written on both paths. Writing them only when
         // leak monitoring is on would remove them from the settings collection
-        // when it is turned off, and the code defaults some of them to true —
-        // so switching off would switch actions back on.
+        // when it is turned off, and a setting that is absent falls back to the
+        // code default; every action defaults to off there, but an explicit
+        // value keeps the form the only thing that arms one.
         { name: 'ENABLE_REVOKE_SESSION', value: string(respondOn && contains(LeakResponseActions, 'revokeSessions')) }
         { name: 'ENABLE_PASSWORD_CHANGE', value: string(respondOn && contains(LeakResponseActions, 'forcePasswordChange')) }
         { name: 'ENABLE_DISABLE_ACCOUNT', value: string(respondOn && contains(LeakResponseActions, 'disableAccount')) }

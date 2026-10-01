@@ -28,14 +28,21 @@ versioning**: they stay in the git history and never reach a customer. The
 number only goes up in Microsoft Partner or in the Content Hub fork (the Content
 Hub V3 package is a separate rule: `3.0.0`).
 
-**Side effect, not to be skipped:** replacing the `v1.0.0` asset moves every
-**running** installation bound to that URL onto the new code at its next
-restart. Before doing it, look at which apps are bound to it and say so:
+**Side effect, not to be skipped:** replacing the `v1.0.0` asset does not
+reach an installation that already exists. Since 7 Sep 2026 the deployment
+stages the package into the app's own storage account and
+`WEBSITE_RUN_FROM_PACKAGE` points at that blob, so a running app keeps the
+code it was installed with until it is redeployed. The new asset is what the
+next deployment, and the Deploy button, install. To see what an app runs:
 
 ```bash
 az functionapp config appsettings list -g <rg> -n <app> \
   --query "[?name=='WEBSITE_RUN_FROM_PACKAGE'].value" -o tsv
 ```
+
+A value naming `function-releases` is the staged copy. `1` means no package is
+bound. A release URL means an installation that predates the staging, and that
+one still follows the asset: say so before replacing it.
 
 ---
 
@@ -58,6 +65,12 @@ show something safe without ever looking at the credential.
 
 **Decision:** `RunOnStartup` **stays `true`**. The former sync runs as soon as
 the deployment finishes, and because `FormerApplyChanges=true` it writes.
+
+`RunOnStartup` is not "once, at deployment". Azure fires a startup-triggered
+timer on **every** host start: a restart, a scale-out, a wake-up after the app
+sat idle. Microsoft advises against it in production. Both timers (the former
+sync and the leak import) are affected, and with responses armed a start can
+begin a run at any time of day. The ledger keeps a repeat from acting twice.
 
 Why: the "deploy it and it works" experience is worth more than the protection a
 plan-only first run would add. The protection is layered anyway: the bootstrap
@@ -162,6 +175,16 @@ If which code is running is in question, the package at
 `WEBSITE_RUN_FROM_PACKAGE` is downloaded and looked at. No version constant is
 kept in the code, nothing is written to LAW, and no column is added to the DCR
 schema.
+
+---
+
+## 8. Other constraints settled in writing
+
+| Subject | Decision |
+|---|---|
+| Azure resources are shut down when a test ends | Mandatory |
+| Unapproved PR or push to an external repo | Forbidden |
+| `create_incident` and `ROPC` | Deliberately off in the template (comment in `main.bicep`) |
 
 ---
 
@@ -323,13 +346,3 @@ workspace changes, and no query needs to match both spellings.
 **Not offered any more.** The portal form and the template only accept
 `standard` and `strict`. The old spelling is accepted from an app setting, not
 handed to anyone new.
-
----
-
-## 8. Other constraints settled in writing
-
-| Subject | Decision |
-|---|---|
-| Azure resources are shut down when a test ends | Mandatory |
-| Unapproved PR or push to an external repo | Forbidden |
-| `create_incident` and `ROPC` | Deliberately off in the template (comment in `main.bicep`) |

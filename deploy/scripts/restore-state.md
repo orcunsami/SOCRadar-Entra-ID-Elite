@@ -39,15 +39,10 @@ Run one plan-only cycle (`FORMER_APPLY_CHANGES=false`) and check
 
 ## Strategy 2 — restore from backup
 
-Re-insert the rows from a `backup-state.sh` JSON dump:
-
-```bash
-python3 - <<'EOF'
-# for each item in <backup>/FormerOwnership.json: az storage entity insert
-# (PartitionKey/RowKey/state fields). Left as an explicit operator step —
-# restoring a stale ledger is a decision, not an automation.
-EOF
-```
+Re-insert the rows from a `backup-state.sh` JSON dump. There is no restore script, on purpose: restoring a stale ledger is a decision, not an
+automation. By hand, for each item in `<backup>/FormerOwnership.json`, insert it with
+`az storage entity insert --table-name FormerOwnership --account-name <storage> --entity
+PartitionKey=<pk> RowKey=<rk> <state fields>`. Nothing is restored until you have done that.
 
 A restored (possibly stale) ledger may claim ownership of records the
 engine no longer manages. After ANY restore: one plan-only cycle +

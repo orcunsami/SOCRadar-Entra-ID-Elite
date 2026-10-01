@@ -16,7 +16,8 @@ company is only ever searched in its own tenants.
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Forcunsami%2FSOCRadar-Entra-ID-Elite%2Fmaster%2Fdeploy%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Forcunsami%2FSOCRadar-Entra-ID-Elite%2Fmaster%2Fdeploy%2FcreateUiDefinition.json)
 
-Runs as an Azure Function App. Syncing starts right after deployment;
+Runs as an Azure Function App. Syncing starts right after deployment (and, with
+`RunOnStartup` on, again at every host start: a restart, a scale-out, a wake-up after idle);
 for a read-only trial turn off Apply changes in the form (plan-only mode). That
 covers the scheduled sync; `POST /api/former/manual` is a deliberate operator
 override and writes whatever it is given, in either mode.
@@ -29,9 +30,10 @@ Apply changes.
 ## Deploy
 
 Portal: use `deploy/azuredeploy.json` with `deploy/createUiDefinition.json`
-(custom deployment). The form takes one grid row per company — your own company in the first row, the other group companies below it: company ID,
-its own tenant GUIDs, its API key and its actor email. Group tenants are
-derived automatically from the other rows.
+(custom deployment). The form takes one grid row per company — your own company
+in the first row, the other group companies below it: company ID, its own
+tenant GUIDs, its API key and its actor email. Group tenants are derived
+automatically from the other rows.
 
 A tenant that belongs to the group but has no company of its own on the
 platform, such as a holding tenant, goes in **Other group tenants** instead.
@@ -63,8 +65,8 @@ Two consequences worth knowing:
   install time; a later release does not reach an existing installation. Redeploy to pick it up.
   Before September 2026 the app read that URL on every cold start, so a new release arrived on
   its own.
-- `RunOnStartup=false` no longer means "no code push". It only controls whether the first import
-  runs immediately. The package is pushed either way, because with `WEBSITE_RUN_FROM_PACKAGE=1`
+- `RunOnStartup=false` no longer means "no code push". It only controls whether the timers fire at
+  every host start (restart, scale-out, wake-up after idle) rather than on their schedule. The package is pushed either way, because with `WEBSITE_RUN_FROM_PACKAGE=1`
   the app starts empty.
 
 If the deployment fails at `triggerFirstRun`, the message says which step: an unreachable
@@ -87,6 +89,8 @@ the deployment reports a failure **and the app is left with no code** -- it does
 serving the package it had. Recovery does not need a rebuild: the previous package is still in
 the `function-releases` container of the app's storage account, and pointing
 `WEBSITE_RUN_FROM_PACKAGE` back at that blob brings the app back while you retry.
+Every deployment leaves one more `package-<timestamp>.zip` (about 7 MB) in that container
+and nothing deletes the old ones; remove the ones you no longer need for recovery.
 Rotating the storage account keys invalidates the read token inside that pointer, so the app
 loses its code at the next restart -- issue a new token for the same blob and write the
 pointer back.
@@ -135,6 +139,13 @@ Manual entries survive reconciles until removed with `action: remove`.
   suspiciously. To confirm real shrinkage, set `FORMER_GUARD_ACCEPT_DROP=true`,
   let one run finish, then **remove the setting again** — nothing clears it for
   you, and while it is set that guard never trips.
+- `EnableCrossTenantSuppress` (default on) is a template parameter, not a form field. It makes
+  someone still active in one tenant a non-leaver in every other company of the map; turn it off
+  with `EnableCrossTenantSuppress=false` if any two companies are unrelated.
+- If a mutation went out but the list could not be read back, the run records
+  `former_mutation_unconfirmed` in `SOCRadar_EntraID_Audit_CL`. Those entries are not marked as
+  owned, so the sync will never remove them: the list only grows until the readback works.
+  Look for that event in `SOCRadar_EntraID_Audit_CL` (see **Is it working?**).
 - Timer and manual endpoint are serialized per company with a lease lock.
 - Every action lands in the `SOCRadar_EntraID_Audit_CL` Log Analytics
   table with hashed emails.
@@ -146,7 +157,7 @@ Manual entries survive reconciles until removed with `action: remove`.
 ## Leaked credentials
 
 Turn it on in the Leaked credentials step. The first check runs as soon as the
-deployment finishes, then on the schedule you picked. Findings land in
+deployment finishes and at every host start while `RunOnStartup` is on, then on the schedule you picked. Findings land in
 `SOCRadar_Botnet_CL`, `SOCRadar_PII_CL` and `SOCRadar_VIP_CL`, one row per
 finding with the `company_id` it belongs to; run summaries go to
 `SOCRadar_ImportAudit_CL`.
@@ -230,6 +241,22 @@ is **not** processed again on a later run — the window moves on regardless. So
 grant the licence, or the permission, before turning the response on rather
 than after.
 
+This holds for every response, not only that one: a failed action (`..._failed`,
+`force_mfa_rereg_partial`, `force_mfa_rereg_no_permission`) is written to the row's
+`actions_taken` and counted in `error_count`, but it does not hold the window. A missing
+permission would otherwise re-read the same window until the run gave up on it. Read
+`error_count` after switching a response on.
+
+Accounts are matched by `GET /users/{address}`, which accepts a user principal name or an
+object ID. A leaked address that is only an alias or the primary SMTP address, and not the
+UPN, comes back as not found and the account is left alone; this differs from the former
+sync, which also matches `mail` and `proxyAddresses`.
+
+Resetting MFA deletes every method it knows how to delete. If a method type is unknown to it
+(for example a hardware OATH token) or one delete fails, the run records `force_mfa_rereg_partial`
+instead of `force_mfa_rereg`, counts an error, and does not mark it done. The window is not held
+for it, so it is retried only if the window is read again for another reason.
+
 Because MFA reset cannot be undone, start with Log only and confirm the matches
 look right before turning responses on.
 
@@ -266,8 +293,8 @@ leak monitoring is off, so read it as a leak-side check only, not as a verdict
 on the install.
 
 **2. Ask about one person.** `POST /api/leak/probe` with an address and a
-company ID says where that person was found. It changes nothing unless you ask
-it to. It covers only the two reversible responses — sign-out and password
+company ID says where that person was found. It changes nothing unless you send
+`"apply": true`, and then only in an apply-mode deployment. It covers only the two reversible responses — sign-out and password
 change. Disabling an account, resetting MFA and confirming compromise are left
 to the scheduled run, so the probe neither shows nor performs them: an empty
 `would_run` here does not mean the schedule would do nothing.
@@ -304,6 +331,16 @@ SOCRadar_ImportAudit_CL
         and (error_count > 0 or truncated or capped or lookup_failed_count > 0)
 | project TimeGenerated, company_id, source, error_count, lookup_failed_count,
           truncated, capped
+```
+
+```kusto
+// Responses that did not happen (a failed action is also counted in error_count)
+union SOCRadar_Botnet_CL, SOCRadar_PII_CL, SOCRadar_VIP_CL
+| where TimeGenerated > ago(1d)
+| where tostring(actions_taken) contains "_failed"
+     or tostring(actions_taken) contains "_partial"
+     or tostring(actions_taken) contains "_no_permission"
+| project TimeGenerated, company_id, entra_user_id, actions_taken
 ```
 
 ```kusto
@@ -380,6 +417,10 @@ addresses for every company in the deployment. Treat it like a password: if it
 ends up in a ticket, a screenshot or a shared tool, rotate it under
 **Function App → App keys → Renew**, then update whatever was using it.
 
+API keys typed into the form's company grid are stored in the `FORMER_COMPANY_MAP` application
+setting of the Function App, in the clear to anyone who can read that app's configuration.
+Restrict who has that access, or deploy with an empty key and use an `api_key_setting` reference.
+
 One setting is deliberately left off and should stay that way:
 
 - `ENABLE_ROPC` — attempts a real sign-in with the leaked password, which shows
@@ -417,6 +458,8 @@ machine.
 cd FunctionApp
 python3 -m pytest tests -q
 ```
+
+CI runs the same tests with `python3 -m unittest discover -s tests`; either works.
 
 Some of these check the app against the template rather than against itself:
 that every setting the code requires is written by `deploy/azuredeploy.json`,

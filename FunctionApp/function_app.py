@@ -47,6 +47,12 @@ PAGE_MIN_RECORDS = 50
 # window is worse than a lost one, because nothing behind it is ever read.
 MAX_CONSECUTIVE_HOLDS = 5
 
+# Outcomes in `actions_taken` that mean a response did not happen. They count
+# toward `errors`; they do not hold the window (a permanently failing action,
+# such as a missing permission, would otherwise re-read the same window until
+# MAX_CONSECUTIVE_HOLDS gave up on it).
+_ACTION_FAILURE_SUFFIXES = ("_failed", "_partial", "_no_permission")
+
 # Honour RUN_ON_STARTUP env var (ARM parameter). Default true.
 _RUN_ON_STARTUP = os.environ.get("RUN_ON_STARTUP", "true").strip().lower() in ("true", "1", "yes")
 
@@ -199,7 +205,8 @@ def leak_preview(req: func.HttpRequest) -> func.HttpResponse:
 
     Shows which tenants each company is searched in and which responses are
     armed. Reads nothing from the feeds and never touches the directory, so it
-    is safe to call at any time.
+    is safe to call at any time. Acquiring a tenant token can write one
+    lifecycle audit row when it fails.
 
     GET /api/leak/preview?code=<function-key>
     """
@@ -275,6 +282,9 @@ def leak_probe(req: func.HttpRequest) -> func.HttpResponse:
         body = req.get_json()
     except ValueError:
         return func.HttpResponse('{"error": "body must be JSON"}',
+                                 status_code=400, mimetype="application/json")
+    if not isinstance(body, dict):
+        return func.HttpResponse('{"error": "body must be a JSON object"}',
                                  status_code=400, mimetype="application/json")
 
     email = (body.get("email") or "").strip().lower()
@@ -920,6 +930,11 @@ def _process_source(source_name: str, conf: dict, credential, tenant_headers_map
                             source_name.upper()
                         )
                         taken.append("force_mfa_rereg_no_permission")
+                    elif mfa_result["methods_deleted"] > 0 and mfa_result.get("errors"):
+                        # Some methods are gone and some are not. Filing this as
+                        # done would put it in the ledger, so the leftover
+                        # method is never retried.
+                        taken.append("force_mfa_rereg_partial")
                     elif mfa_result["methods_deleted"] > 0:
                         taken.append("force_mfa_rereg")
                         _record_applied_safely(ledger, email, source_name,
@@ -967,6 +982,14 @@ def _process_source(source_name: str, conf: dict, credential, tenant_headers_map
                         _record_applied_safely(ledger, email, source_name,
                                                "resolve_alarm", window_date, taken)
 
+            # A response that did not happen is an error of this run. It stays
+            # in actions_taken for the row, but the run summary is what the
+            # "went wrong" query reads, and it used to say error_count 0.
+            failed_actions = [t for t in taken if t.endswith(_ACTION_FAILURE_SUFFIXES)]
+            if failed_actions:
+                errors += len(failed_actions)
+                logger.error("[%s] %d response action(s) did not complete for one finding: %s",
+                             source_name.upper(), len(failed_actions), ", ".join(failed_actions))
             emp["actions_taken"] = taken
             emp.pop("_checkpoint_update", None)  # internal key — must not reach LAW
             records.append(emp)
@@ -1399,7 +1422,7 @@ def former_employee_sync(timer: func.TimerRequest) -> None:
             # failure is reported per item and must not stop the rest of the loop.
             summary.append((cid, "FAIL", snap["error"]))
             try:
-                law.write_lifecycle_event(fconf, "former_company_failed",
+                law.write_lifecycle_event(_company_conf(fconf, snap["row"]), "former_company_failed",
                                           details=f"company {cid}: {snap['error']}")
                 # Keep the persistent audit table shape uniform: failed
                 # companies also get a blocked reconcile-summary row.
@@ -1453,7 +1476,7 @@ def former_employee_sync(timer: func.TimerRequest) -> None:
             summary.append((cid, "FAIL", f"apply: {apply_error}"))
             try:
                 law.write_lifecycle_event(
-                    fconf, "former_apply_failed",
+                    _company_conf(fconf, snap["row"]), "former_apply_failed",
                     details=f"company {cid}: {str(apply_error)[:400]}")
             except Exception as audit_error:
                 logger.error("[FORMER][%s] apply failed AND its lifecycle row "
@@ -1470,7 +1493,7 @@ def former_employee_sync(timer: func.TimerRequest) -> None:
                     "unconfirmed and re-run a plan-only cycle.", cid)
                 try:
                     law.write_lifecycle_event(
-                        fconf, "former_lease_lapsed_during_apply",
+                        _company_conf(fconf, snap["row"]), "former_lease_lapsed_during_apply",
                         details=f"company {cid}: lease no longer held after apply")
                 except Exception as audit_error:
                     logger.error("[FORMER][%s] lapsed lease could not be "
@@ -1493,7 +1516,7 @@ def former_employee_sync(timer: func.TimerRequest) -> None:
             summary.append((cid, "UNCONFIRMED", result.get("unconfirmed_reason", "")))
             try:
                 law.write_lifecycle_event(
-                    fconf, "former_mutation_unconfirmed",
+                    _company_conf(fconf, snap["row"]), "former_mutation_unconfirmed",
                     details=(f"company {cid}: adds={result.get('unconfirmed_adds', 0)} "
                              f"removes={result.get('unconfirmed_removes', 0)} "
                              f"{result.get('unconfirmed_reason', '')}"[:400]))
@@ -1573,6 +1596,9 @@ def former_manual(req: func.HttpRequest) -> func.HttpResponse:
     except ValueError:
         return func.HttpResponse('{"error": "invalid JSON body"}', status_code=400,
                                  mimetype="application/json")
+    if not isinstance(body, dict):
+        return func.HttpResponse('{"error": "body must be a JSON object"}',
+                                 status_code=400, mimetype="application/json")
 
     action = str(body.get("action", "")).strip().lower()
     emails = body.get("emails")

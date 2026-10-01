@@ -61,7 +61,7 @@ def fetch(conf: dict, checkpoint: dict, deadline: float = None,
     """
     Fetch Botnet Data v2 records.
     Filters to isEmployee=true on client side.
-    Returns sanitized records (plaintext password never stored).
+    Returns records with the password as SOCRadar delivered it (product-policy §2).
     Respects MAX_PAGES_PER_RUN to avoid function timeout.
     """
     return BotnetFetcher().fetch(conf, checkpoint, deadline, max_records)

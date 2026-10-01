@@ -23,7 +23,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 class ATypoNeverArmsAnAction(unittest.TestCase):
     """H-6: _bool used to fall back to the DEFAULT on an unrecognised value,
-    and several mutation switches default to on — so ENABLE_REVOKE_SESSION set
+    and several mutation switches then defaulted to on (they default to off now) — so ENABLE_REVOKE_SESSION set
     to 'disabled' left the action armed."""
 
     def _bool(self, value, default):

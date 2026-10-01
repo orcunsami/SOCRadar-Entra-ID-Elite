@@ -506,7 +506,7 @@
             "type": "Microsoft.Common.TextBlock",
             "visible": "[and(steps('leak').enableLeak, equals(steps('leak').response, 'respond'))]",
             "options": {
-              "text": "One of these cannot be undone: resetting MFA registration wipes the person's registered methods and they have to enrol again. A reset wipes the registered methods and the person has to enrol again. Disabling an account can be reversed, and a compromise mark can be dismissed in Identity Protection. Responding also needs write permission in every tenant you listed, so each tenant's admin consents once. Start with Log only if you want to see the matches first."
+              "text": "One of these cannot be undone: resetting MFA registration wipes the person's registered methods and they have to enrol again. Disabling an account can be reversed, and a compromise mark can be dismissed in Identity Protection. Responding also needs write permission in every tenant you listed, so each tenant's admin consents once. Start with Log only if you want to see the matches first."
             }
           }
         ]

@@ -209,7 +209,7 @@ class SuccessIsRecorded(unittest.TestCase):
 
         applied = [a for a in taken if not a.endswith(
             ("_planned", "_skipped_idempotent", "_skipped_cap", "_failed",
-             "_no_methods", "_no_permission"))]
+             "_partial", "_no_methods", "_no_permission"))]
         self.assertTrue(applied, f"no action reported success: {taken}")
         self.assertEqual(sorted(set(applied)), sorted(set(recorded)),
                          "an action ran but was never written to the ledger, so "

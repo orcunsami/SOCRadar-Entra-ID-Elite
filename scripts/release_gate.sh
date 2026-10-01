@@ -5,6 +5,8 @@
 #   scripts/release_gate.sh
 #   scripts/release_gate.sh --keep        # leave the group for inspection
 #
+# Requires GATE_EXPECTED_SUBSCRIPTION_ID (the subscription to deploy into).
+#
 # Exit: 0 proven · 1 a check failed or cleanup left something behind · 2 the
 # package installs but readiness could not be proven from this account.
 #
@@ -100,6 +102,13 @@ step "Preflight"
 command -v az >/dev/null || { echo "az not found"; exit 1; }
 SUB=$(az account show --query name -o tsv) || { echo "run: az login"; exit 1; }
 pass "subscription: $SUB"
+# The retired subscription is still Enabled in ARM; a wrong `az account` would
+# deploy real resources there. Say which subscription is the right one.
+EXPECTED_SUB_ID="${GATE_EXPECTED_SUBSCRIPTION_ID:-}"
+[ -n "$EXPECTED_SUB_ID" ] \
+  || { fail "set GATE_EXPECTED_SUBSCRIPTION_ID to the subscription this gate may deploy into"; exit 1; }
+[ "$(az account show --query id -o tsv)" = "$EXPECTED_SUB_ID" ] \
+  || { fail "active subscription is not $EXPECTED_SUB_ID: az account set --subscription $EXPECTED_SUB_ID"; exit 1; }
 
 # az account show serves a cached value, so it says nothing about whether the
 # subscription can still take writes. A Warned (read-only) subscription fails
@@ -115,9 +124,9 @@ SUB_STATE=$(az rest --method GET \
 # Set GATE_PACKAGE_URI to test a package that is not published yet. Without it
 # the gate installs whatever the template points at, which is the code already
 # in customers' hands — useful for checking a template change, useless for
-# checking new code. Uploading first and testing afterwards would mean every
-# running installation picks up untested code the moment it restarts, because
-# the release URL never changes (product-policy §1).
+# checking new code. Uploading first and testing afterwards would publish
+# untested code as what the next deployment and the Deploy button install
+# (product-policy §1). Existing installations keep their staged copy.
 PKG=$(python3 -c "import json;print(json.load(open('$TEMPLATE'))['parameters']['PackageUri']['defaultValue'])")
 if [ -n "${GATE_PACKAGE_URI:-}" ]; then
   PKG="$GATE_PACKAGE_URI"

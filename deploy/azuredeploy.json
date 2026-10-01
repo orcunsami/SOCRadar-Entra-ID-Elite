@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.45.15.27210",
-      "templateHash": "8633010019506833287"
+      "templateHash": "2334772548439495059"
     }
   },
   "parameters": {
@@ -110,7 +110,7 @@
       "type": "bool",
       "defaultValue": true,
       "metadata": {
-        "description": "Run the first former sync right after deployment."
+        "description": "Fire both timers at every host start, not only once after deployment: a restart, a scale-out and a wake-up after idle each trigger a run. Microsoft advises against this in production; see docs/product-policy.md section 3."
       }
     },
     "IncludeDeletedUsers": {
@@ -134,6 +134,8 @@
     "FormerMaxAdds": {
       "type": "int",
       "defaultValue": 500,
+      "minValue": 0,
+      "maxValue": 100000,
       "metadata": {
         "description": "Absolute cap on adds per run per company."
       }
@@ -141,6 +143,8 @@
     "FormerMaxRemovals": {
       "type": "int",
       "defaultValue": 100,
+      "minValue": 0,
+      "maxValue": 100000,
       "metadata": {
         "description": "Absolute cap on removals per run per company."
       }
@@ -148,6 +152,8 @@
     "FormerMaxRemovalPercent": {
       "type": "int",
       "defaultValue": 50,
+      "minValue": 0,
+      "maxValue": 100,
       "metadata": {
         "description": "Removals may not exceed this percentage of the remote list."
       }
@@ -212,6 +218,7 @@
       "type": "int",
       "defaultValue": 90,
       "minValue": 30,
+      "maxValue": 3650,
       "metadata": {
         "description": "Days the idempotency ledger keeps a window before its rows are removed. Rows older than this cannot be reached by any re-read, so keeping them only grows the table. Values below 30 are raised to 30 by the app."
       }

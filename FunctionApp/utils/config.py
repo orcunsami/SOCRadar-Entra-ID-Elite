@@ -126,8 +126,8 @@ def load() -> dict:
         # Action toggles
         "enable_user_lookup":       user_lookup,
         "enable_ropc":              _bool("ENABLE_ROPC", False),
-        "enable_revoke_session":    _bool("ENABLE_REVOKE_SESSION", True),
-        "enable_add_to_group":      _bool("ENABLE_ADD_TO_GROUP", True),
+        "enable_revoke_session":    _bool("ENABLE_REVOKE_SESSION", False),
+        "enable_add_to_group":      _bool("ENABLE_ADD_TO_GROUP", False),
         "enable_remove_from_group": _bool("ENABLE_REMOVE_FROM_GROUP", False),
         "enable_password_change":   _bool("ENABLE_PASSWORD_CHANGE", False),
         "enable_disable_account":   _bool("ENABLE_DISABLE_ACCOUNT", False),
@@ -285,8 +285,8 @@ def load_former() -> dict:
         # aware and plan-only by default. Real deletion never happens unless
         # apply is explicitly turned on AND the snapshot is complete AND the plan
         # is under the caps. These defaults keep an elite deployment safe even
-        # with real credentials (contrast: the Taegis bridge shipped apply-all;
-        # elite is production-blocked, so its safe default is plan-only).
+        # with real credentials. The code default is plan-only; the template
+        # writes FORMER_APPLY_CHANGES itself and defaults it to true.
         "former_apply_changes":      _bool("FORMER_APPLY_CHANGES", False),
         "former_max_adds":           _int("FORMER_MAX_ADDS", 500, on_invalid=0),
         "former_max_removals":       _int("FORMER_MAX_REMOVALS", 100, on_invalid=0),

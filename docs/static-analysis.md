@@ -38,8 +38,8 @@ problems beyond those defects:
 | Finding | Where | Status |
 |---|---|---|
 | `date.today()` is naive, breaking the code base's UTC convention | `actions/action_ledger.py:53` | ✅ fixed |
-| `except Exception: pass` swallows a lifecycle event (its own comment says it "should be alertable") | `function_app.py:1069` | ✅ fixed |
-| `except Exception: pass` swallows the audit row of a failed company | `function_app.py:1213` | ✅ fixed |
+| `except Exception: pass` swallows a lifecycle event (its own comment says it "should be alertable") | `function_app.py` (`_former_guard_check`) | ✅ fixed |
+| `except Exception: pass` swallows the audit row of a failed company | `function_app.py` (`former_employee_sync`, failed-company branch) | ✅ fixed |
 
 So the verdict is not "do not use them": **run them by hand before a release,
 do not make them a gate.**
