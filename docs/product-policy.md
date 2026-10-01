@@ -261,6 +261,8 @@ Verified live: a single KQL query returns `AppTraces` and
 carries an `@` (`vipName` → `email` → `keyword`). If none of them does, there
 **is no** address; the record is written with
 `entra_status = skipped_no_address` and Microsoft Graph is not asked about it.
+The same holds for every source: a value without exactly one `@` and text on both
+sides of it (a botnet `user` that is a number or a login name) is "no address".
 
 **Why.** VIP records usually name a person **by name**. In a live sample every
 record's `vipName` was a first and last name, none of them carried an `@`, and

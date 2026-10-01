@@ -158,9 +158,25 @@ Manual entries survive reconciles until removed with `action: remove`.
 
 Turn it on in the Leaked credentials step. The first check runs as soon as the
 deployment finishes and at every host start while `RunOnStartup` is on, then on the schedule you picked. Findings land in
-`SOCRadar_Botnet_CL`, `SOCRadar_PII_CL` and `SOCRadar_VIP_CL`, one row per
-finding with the `company_id` it belongs to; run summaries go to
-`SOCRadar_ImportAudit_CL`.
+`SOCRadar_Botnet_CL`, `SOCRadar_PII_CL` and `SOCRadar_VIP_CL`, with the
+`company_id` each belongs to; run summaries go to `SOCRadar_ImportAudit_CL`.
+
+Rows are appended and never deduplicated. A finding is written once per run
+that reads it, so it is one row only when its window was read once. When a run
+holds its window (see the counters below) the next run reads the same findings
+again and writes them again, with whatever `entra_status` that run reached: the
+same botnet finding can show up as `skipped_no_token` and later as `not_found`.
+A window is read at most 5 times in a row before the run lets it go. The botnet feed has no stable record
+ID to join on, so to count distinct findings keep the latest row per finding:
+
+```kusto
+SOCRadar_Botnet_CL
+| summarize arg_max(TimeGenerated, *) by company_id, email, url, log_date, device_ip
+```
+
+`SOCRadar_ImportAudit_CL` counts what each run handled, so a re-read window is
+counted again there too. Applied responses are not repeated by a re-read: the
+ledger remembers who was already acted on in that window.
 
 Fill in **Your own email domains** to keep the search inside them. An address a
 feed returns from outside those domains is dropped inside the app and is never
@@ -168,12 +184,15 @@ sent to Microsoft. Leave it empty and every address the feed returns is looked
 up.
 
 Not every finding carries an address. VIP findings in particular often name a
-person rather than an address, and there is nothing in them to match against a
-directory. Those rows still land in the table, with `entra_status` set to
-`skipped_no_address`, and `no_address_count` in the run summary says how many
-there were. They are findings you may still want to read; they are just not
-findings the app can tie to an account. The app does not guess — it will not
-send a person's name to Microsoft as though it were an address.
+person rather than an address, and botnet findings often carry a login name or
+a number in the `user` field. There is nothing in those to match against a
+directory. A value that does not contain exactly one @, with text on both sides
+of it, is treated as no address: the row still lands in the table, with
+`entra_status` set to `skipped_no_address`, and `no_address_count` in the run
+summary says how many there were. They are findings you may still want to read;
+they are just not findings the app can tie to an account. The app does not
+guess, and it sends Microsoft only values shaped like an address. A value that
+is shaped like an address but is not in the directory is `not_found`.
 
 Two more ways a record can leave without being matched, and they mean opposite
 things. `lookup_disabled_count` is your own choice — directory matching is

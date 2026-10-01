@@ -10,6 +10,7 @@ Sources:
 """
 
 import os
+import re
 import time
 import logging
 import functools
@@ -46,6 +47,10 @@ PAGE_MIN_RECORDS = 50
 # After this many failed attempts at the same window, move past it: a stuck
 # window is worse than a lost one, because nothing behind it is ever read.
 MAX_CONSECUTIVE_HOLDS = 5
+
+# Exactly one "@" with something on both sides. Botnet "user" is often a number or
+# a login name; asked of Graph as a UPN it only ever answers 404 (product policy 13).
+_LOOKS_LIKE_ADDRESS = re.compile(r"^[^@\s]+@[^@\s]+$")
 
 # Outcomes in `actions_taken` that mean a response did not happen. They count
 # toward `errors`; they do not hold the window (a permanently failing action,
@@ -686,8 +691,10 @@ def _process_source(source_name: str, conf: dict, credential, tenant_headers_map
             if emp.get("sanitized"):
                 raw_pw = emp["sanitized"].pop("_raw", None)
 
-            if not email:
-                # Not every feed record carries an address. VIP is the standing
+            if not email or not _LOOKS_LIKE_ADDRESS.match(email):
+                # Not every feed record carries an address, and some carry a
+                # login name or a number where one belongs (botnet `user`).
+                # Asking Graph about those only yields a misleading not_found. VIP is the standing
                 # case: those records name a person, and an address, where there
                 # is one at all, sits in free text. Dropping the record here made
                 # it vanish from Log Analytics with no counter and no log line,

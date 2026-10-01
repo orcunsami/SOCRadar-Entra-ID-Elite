@@ -306,5 +306,97 @@ class TheTemplateBoundsItsCaps(unittest.TestCase):
         self.assertIn("maxValue", self.PARAMS["LeakLedgerRetentionDays"])
 
 
+def _leak_run(values, tenants=None, conf_over=None):
+    """Run one botnet-shaped source over `values`; return (summary, graph_calls, rows, saved)."""
+    from actions import law_writer
+    conf = dict(_conf(), enable_user_lookup=True, verified_domains=[],
+                entra_action_mode="plan",
+                storage_account_name="sa", tenant_ids=["t-a"], tenant_id="",
+                client_id="app-1", socradar_company_id="1234567",
+                dcr_immutable_id="dcr-1", dcr_endpoint="https://e.invalid",
+                initial_lookback_minutes=43200, initial_start_date="")
+    conf.update(conf_over or {})
+    emps = [{"email": v, "url": f"https://x.invalid/{i}", "source": "botnet",
+             "is_employee": True} for i, v in enumerate(values)]
+    emps[-1]["_checkpoint_update"] = {"last_start_date": "2026-07-27"}
+    tenants = {"t-a": {"Authorization": "x"}} if tenants is None else tenants
+    with mock.patch.object(function_app.src_botnet, "fetch", return_value=emps), \
+         mock.patch.object(function_app.cp, "load", return_value={}), \
+         mock.patch.object(function_app.cp, "save") as save, \
+         mock.patch.object(function_app.entra, "lookup_user",
+                           return_value=(None, 404)) as lu, \
+         mock.patch.object(law_writer, "_upload", return_value=True) as up:
+        out = function_app._process_source(
+            "botnet", conf, None, tenants, deadline=float("inf"),
+            checkpoint_key="botnet:1234567")
+    rows = [r for c in up.call_args_list
+            if c[0][1] == law_writer.STREAM_MAP["botnet"] for r in c[0][2]]
+    return out, lu, rows, save
+
+
+class ANonAddressIsNotSentToGraph(unittest.TestCase):
+    """Policy 13: where there is no address, Graph is not asked.
+
+    A botnet `user` is often a number or a login name. Looked up as a UPN it
+    comes back 404 and was counted as "address not in the directory".
+    """
+
+    NOT_ADDRESSES = ["1234567890123", "jsmith", "Jane Doe", "a@", "@b.com", "a@b@c.com"]
+
+    def test_graph_is_not_asked(self):
+        _, lu, _, _ = _leak_run(self.NOT_ADDRESSES)
+        lu.assert_not_called()
+
+    def test_each_one_lands_in_the_no_address_bucket(self):
+        out, _, rows, _ = _leak_run(self.NOT_ADDRESSES)
+        self.assertEqual(out["no_address"], len(self.NOT_ADDRESSES))
+        self.assertEqual(out["not_found"], 0)
+        self.assertEqual({r["entra_status"] for r in rows}, {"skipped_no_address"})
+        self.assertEqual(len(rows), len(self.NOT_ADDRESSES))
+
+    def test_an_address_is_still_looked_up(self):
+        out, lu, _, _ = _leak_run(["1234567890123", "someone@x.invalid"])
+        self.assertEqual(lu.call_count, 1)
+        self.assertEqual((out["no_address"], out["not_found"]), (1, 1))
+
+    def test_the_buckets_still_close(self):
+        out, _, _, _ = _leak_run(["1234567890123", "someone@x.invalid", "jsmith"])
+        parts = sum(out[k] for k in ("found", "not_found", "no_address", "domain_filtered"))
+        self.assertEqual(parts, out["total"])
+
+    def test_it_does_not_hold_the_window(self):
+        _, _, _, save = _leak_run(self.NOT_ADDRESSES)
+        saved = save.call_args[0][3]
+        self.assertEqual(saved.get("last_start_date"), "2026-07-27")
+        self.assertEqual(saved.get("consecutive_holds"), 0)
+
+
+class ARereadWindowWritesItsRowsAgain(unittest.TestCase):
+    """README: rows are appended and never deduplicated; a held window repeats."""
+
+    def test_a_held_window_is_written_twice(self):
+        # No tenant produced a token: rows are written as skipped_no_token and the
+        # window is held. The next run reads the same records and writes them again.
+        first = _leak_run(["a@x.invalid", "b@x.invalid"], tenants={})
+        second = _leak_run(["a@x.invalid", "b@x.invalid"])
+        self.assertEqual({r["entra_status"] for r in first[2]}, {"skipped_no_token"})
+        self.assertEqual({r["entra_status"] for r in second[2]}, {"not_found"})
+        held = first[3].call_args[0][3]
+        self.assertEqual(held.get("consecutive_holds"), 1)
+        self.assertNotIn("last_start_date", held)
+        # same finding, two rows, different entra_status
+        self.assertEqual([r["email"] for r in first[2]], [r["email"] for r in second[2]])
+
+    def test_the_readme_says_so(self):
+        text = _prose(REPO / "README.md")
+        self.assertNotIn("one row per finding", text)
+        self.assertIn("appended and never deduplicated", text)
+        self.assertIn("arg_max(TimeGenerated", text)
+
+    def test_the_readme_says_a_non_address_is_not_sent(self):
+        text = _prose(REPO / "README.md")
+        self.assertIn("does not contain exactly one @", text)
+
+
 if __name__ == "__main__":
     unittest.main()
