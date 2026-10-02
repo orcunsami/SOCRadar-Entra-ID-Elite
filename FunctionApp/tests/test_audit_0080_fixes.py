@@ -252,6 +252,76 @@ class PolicyAndGateDescribeTheStagedPackage(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("GATE_EXPECTED_SUBSCRIPTION_ID", r.stdout + r.stderr)
 
+    def _run_gate(self, graph_fails):
+        """Run the gate against a fake az/curl up to the first deployment step."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            az = Path(d) / "az"
+            az.write_text(
+                '#!/bin/sh\necho "$*" >> "$TMPDIR/az.calls"\ncase "$1 $2" in\n'
+                '"account show") case "$*" in *name*) echo sub;; *tenantId*) echo t;; *) echo sid;; esac;;\n'
+                '"rest --method") echo Enabled;;\n'
+                '"ad app") ' + ('exit 1;;\n' if graph_fails else 'exit 0;;\n') +
+                '"group create") exit 0;;\n'
+                '*) exit 1;;\nesac\n')
+            curl = Path(d) / "curl"
+            curl.write_text("#!/bin/sh\necho 200\n")
+            for f in (az, curl):
+                f.chmod(0o755)
+            env = dict(os.environ, PATH=f"{d}:{os.environ['PATH']}", TMPDIR=d,
+                       GATE_EXPECTED_SUBSCRIPTION_ID="sid", GATE_COMPANY_ID="1",
+                       GATE_API_KEY="k", GATE_APP_ID="a",
+                       GATE_RG="gate-unit", GATE_PACKAGE_URI="https://x/p.zip?sv=1&sig=SECRETSIG%3D&se=2")
+            r = subprocess.run(["bash", str(REPO / "scripts" / "release_gate.sh")],
+                               capture_output=True, text=True, env=env)
+            calls = Path(d, "az.calls")
+            self.az_calls = calls.read_text() if calls.exists() else ""
+        return r.returncode, r.stdout + r.stderr
+
+    def test_the_gate_never_prints_the_sas_signature(self):
+        code, out = self._run_gate(graph_fails=False)
+        self.assertIn("package reachable", out)
+        self.assertNotIn("SECRETSIG", out)
+        self.assertIn("sig=***", out)
+
+    def test_a_graph_error_is_not_read_as_no_leftover_credentials(self):
+        code, out = self._run_gate(graph_fails=True)
+        self.assertNotIn("no leftover gate credentials", out)
+        self.assertIn("Graph error", out)
+        self.assertNotEqual(code, 0)
+
+    def test_an_empty_credential_list_is_green(self):
+        _, out = self._run_gate(graph_fails=False)
+        self.assertIn("no leftover gate credentials", out)
+
+    def test_the_deployment_script_timeout_is_long_enough(self):
+        bicep = (REPO / "deploy" / "main.bicep").read_text(encoding="utf-8")
+        block = bicep.split("addFicToExistingApp")[1].split("scriptContent")[0]
+        self.assertIn("timeout: 'PT15M'", block)
+        arm = (REPO / "deploy" / "azuredeploy.json").read_text(encoding="utf-8")
+        self.assertNotIn('"timeout": "PT5M"', arm)
+
+    def test_the_template_bounds_every_graph_call_with_timeout(self):
+        # Only the deployment script's own calls; ficManualCommand is text for a human.
+        bicep = (REPO / "deploy" / "main.bicep").read_text(encoding="utf-8")
+        arm = (REPO / "deploy" / "azuredeploy.json").read_text(encoding="utf-8")
+        scripts = {
+            "main.bicep": bicep.split("addFicToExistingApp")[1].split("scriptContent")[1].split("'''")[1],
+            "azuredeploy.json": arm[arm.index("FIC_NAME="):].split("exit 0")[0],
+        }
+        for name, text in scripts.items():
+            hits = [m.start() for m in re.finditer(r"az ad app federated-credential (?:list|create)", text)]
+            self.assertEqual(len(hits), 2, name)
+            for i in hits:
+                self.assertEqual(text[i - 12:i], "timeout 120 ", name)
+
+    def test_a_graph_error_stops_the_gate_before_any_deployment(self):
+        code, out = self._run_gate(graph_fails=True)
+        self.assertEqual(code, 1, out)
+        self.assertIn("stopping before deployment", out)
+        self.assertNotIn("group create", self.az_calls)
+        self.assertNotIn("Deploying", out)
+
     def test_the_gate_still_parses(self):
         r = subprocess.run(["bash", "-n", str(REPO / "scripts" / "release_gate.sh")],
                            capture_output=True, text=True)

@@ -5,8 +5,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.45.15.27210",
-      "templateHash": "2334772548439495059"
+      "version": "0.47.16.16243",
+      "templateHash": "15346405261425248284"
     }
   },
   "parameters": {
@@ -701,7 +701,7 @@
         "azCliVersion": "2.50.0",
         "retentionInterval": "PT26H",
         "cleanupPreference": "OnSuccess",
-        "timeout": "PT5M",
+        "timeout": "PT15M",
         "environmentVariables": [
           {
             "name": "APP_ID",
@@ -720,7 +720,7 @@
             "value": "[resourceGroup().name]"
           }
         ],
-        "scriptContent": "      FIC_NAME=\"former-elite-${RG_NAME}-uami\"\n      ADDED=false\n      EXISTING=$(az ad app federated-credential list --id \"$APP_ID\" --query \"[?subject=='${UAMI_PRINCIPAL}'].name\" -o tsv 2>/dev/null || echo \"\")\n      if [ -n \"$EXISTING\" ]; then\n        echo \"FIC already exists for UAMI ${UAMI_PRINCIPAL} on app ${APP_ID}: ${EXISTING}\"\n        ADDED=true\n      elif az ad app federated-credential create --id \"$APP_ID\" --parameters \"{\n          \\\"name\\\": \\\"${FIC_NAME}\\\",\n          \\\"issuer\\\": \\\"https://login.microsoftonline.com/${TENANT_ID}/v2.0\\\",\n          \\\"subject\\\": \\\"${UAMI_PRINCIPAL}\\\",\n          \\\"audiences\\\": [\\\"api://AzureADTokenExchange\\\"]\n        }\"; then\n        echo \"FIC added\"\n        ADDED=true\n      else\n        # Fail-soft: the deployment identity (UAMI) usually has no Entra\n        # app-write permission on a foreign App Registration. The app cannot\n        # run until the FIC exists, but failing the whole deployment here\n        # would strand the rest of the install. Surface the exact command.\n        echo \"WARNING: could not add FIC automatically (no Entra app-write permission).\"\n        echo \"Run the command from the deployment output 'ficManualCommand' as an owner of the App Registration.\"\n      fi\n      # Report what actually happened. The Outputs blade is the only place most\n      # operators look, so it must not claim a success the script did not\n      # achieve: without the FIC the app gets no Graph token and every directory\n      # lookup is skipped, quietly. Keep this JSON trivial -- quoting through\n      # bicep, ARM and the shell is a three-layer escaping trap, and a malformed\n      # output file fails the whole deployment.\n      if [ \"$ADDED\" = \"true\" ]; then\n        echo '{\"ficAdded\": true}' > \"$AZ_SCRIPTS_OUTPUT_PATH\"\n      else\n        echo '{\"ficAdded\": false}' > \"$AZ_SCRIPTS_OUTPUT_PATH\"\n      fi\n      exit 0\n    "
+        "scriptContent": "      FIC_NAME=\"former-elite-${RG_NAME}-uami\"\n      ADDED=false\n      # timeout: a hung Graph call must reach the fail-soft branch, not ARM's 15 min kill.\n      EXISTING=$(timeout 120 az ad app federated-credential list --id \"$APP_ID\" --query \"[?subject=='${UAMI_PRINCIPAL}'].name\" -o tsv 2>/dev/null || echo \"\")\n      if [ -n \"$EXISTING\" ]; then\n        echo \"FIC already exists for UAMI ${UAMI_PRINCIPAL} on app ${APP_ID}: ${EXISTING}\"\n        ADDED=true\n      elif timeout 120 az ad app federated-credential create --id \"$APP_ID\" --parameters \"{\n          \\\"name\\\": \\\"${FIC_NAME}\\\",\n          \\\"issuer\\\": \\\"https://login.microsoftonline.com/${TENANT_ID}/v2.0\\\",\n          \\\"subject\\\": \\\"${UAMI_PRINCIPAL}\\\",\n          \\\"audiences\\\": [\\\"api://AzureADTokenExchange\\\"]\n        }\"; then\n        echo \"FIC added\"\n        ADDED=true\n      else\n        # Fail-soft: the deployment identity (UAMI) usually has no Entra\n        # app-write permission on a foreign App Registration. The app cannot\n        # run until the FIC exists, but failing the whole deployment here\n        # would strand the rest of the install. Surface the exact command.\n        echo \"WARNING: could not add FIC automatically (no Entra app-write permission).\"\n        echo \"Run the command from the deployment output 'ficManualCommand' as an owner of the App Registration.\"\n      fi\n      # Report what actually happened. The Outputs blade is the only place most\n      # operators look, so it must not claim a success the script did not\n      # achieve: without the FIC the app gets no Graph token and every directory\n      # lookup is skipped, quietly. Keep this JSON trivial -- quoting through\n      # bicep, ARM and the shell is a three-layer escaping trap, and a malformed\n      # output file fails the whole deployment.\n      if [ \"$ADDED\" = \"true\" ]; then\n        echo '{\"ficAdded\": true}' > \"$AZ_SCRIPTS_OUTPUT_PATH\"\n      else\n        echo '{\"ficAdded\": false}' > \"$AZ_SCRIPTS_OUTPUT_PATH\"\n      fi\n      exit 0\n    "
       },
       "dependsOn": [
         "managedIdentity"

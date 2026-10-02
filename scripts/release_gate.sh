@@ -32,10 +32,12 @@ KEEP=0
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMPLATE="$REPO_ROOT/deploy/azuredeploy.json"
 STAMP="$(date -u +%m%d%H%M)"
-RG="gate-$STAMP"
+RG="${GATE_RG:-gate-$STAMP}"   # override for tests only
 FIC_NAME="former-elite-$RG-uami"
 LOCATION="${LOCATION:-northeurope}"
 
+# Never print a SAS signature.
+mask() { sed -E 's/(sig=)[^&[:space:]"]+/\1***/g'; }
 pass() { printf '  \033[32mOK\033[0m   %s\n' "$1"; }
 fail() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; FAILED=1; }
 step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
@@ -133,7 +135,7 @@ if [ -n "${GATE_PACKAGE_URI:-}" ]; then
   printf '  \033[33mNOTE\033[0m candidate package, not the published one\n'
 fi
 CODE=$(curl -sIL -o /dev/null -w '%{http_code}' "$PKG")
-[ "$CODE" = "200" ] && pass "package reachable: ${PKG##*/}" \
+[ "$CODE" = "200" ] && pass "package reachable: $(printf '%s' "$PKG" | mask)" \
                     || { fail "package returns HTTP $CODE — upload the asset first"; exit 1; }
 
 : "${GATE_COMPANY_ID:?set GATE_COMPANY_ID}"
@@ -144,9 +146,13 @@ TENANT=$(az account show --query tenantId -o tsv)
 # Sweep credentials left by earlier runs. This is the backstop, not the trap: a
 # kill -9 skips every trap, and each orphan points at an identity that no longer
 # exists.
-STALE=$(az ad app federated-credential list --id "$GATE_APP_ID" \
-        --query "[?starts_with(name,'former-elite-gate-')].name" -o tsv 2>/dev/null || echo "")
-if [ -n "$STALE" ]; then
+# A Graph error is not an empty list: only a successful read may say "none".
+if ! STALE=$(az ad app federated-credential list --id "$GATE_APP_ID" \
+        --query "[?starts_with(name,'former-elite-gate-')].name" -o tsv 2>"/tmp/$RG.err"); then
+  # Stop before deploying: a deployment that cannot be cleaned up is not worth starting.
+  fail "could not list credentials on the App Registration (Graph error): $(head -1 "/tmp/$RG.err" | mask) — stopping before deployment"
+  exit 1
+elif [ -n "$STALE" ]; then
   for s in $STALE; do
     if sweep_err=$(az ad app federated-credential delete --id "$GATE_APP_ID" \
                      --federated-credential-id "$s" 2>&1); then
@@ -176,7 +182,7 @@ cat > "$PARAMS" <<JSON
   "EntraIdClientId": { "value": "$GATE_APP_ID" },
   "EnableLeakMonitoring": { "value": true },
   "LeakResponse": { "value": "logOnly" },
-  "FormerClientMode": { "value": "mock" },
+  "FormerClientMode": { "value": "${GATE_FORMER_CLIENT_MODE:-mock}" },
   "FormerApplyChanges": { "value": false },
   "PackageUri": { "value": "$PKG" }
 }
@@ -190,7 +196,7 @@ if az deployment group create -g "$RG" -n gate --template-file "$TEMPLATE" \
   pass "deployment succeeded"
 else
   fail "deployment failed"
-  head -20 "/tmp/$RG.err"
+  head -20 "/tmp/$RG.err" | mask
   exit 1
 fi
 

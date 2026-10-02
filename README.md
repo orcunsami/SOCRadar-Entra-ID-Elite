@@ -47,7 +47,8 @@ Creating a new App Registration (the form's default) needs the
 Application Administrator role in Entra ID. Without it the deployment
 fails — pick "Use an existing App Registration" instead and have an app
 owner add the federated credential (the deployment output prints the
-exact command).
+exact command). If that step times out (`DeploymentScriptExceededMaxAllowedTime`),
+redeploy with `SkipFicCreation=true` and add the credential yourself.
 
 CLI: see `deploy/README.md`.
 

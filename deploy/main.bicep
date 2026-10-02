@@ -238,7 +238,8 @@ resource addFicToExistingApp 'Microsoft.Resources/deploymentScripts@2020-10-01' 
     azCliVersion: '2.50.0'
     retentionInterval: 'PT26H'
     cleanupPreference: 'OnSuccess'
-    timeout: 'PT5M'
+    // ARM kills the whole deployment at the limit; the script's own fail-soft cannot catch that.
+    timeout: 'PT15M'
     environmentVariables: [
       { name: 'APP_ID', value: EntraIdClientId }
       { name: 'TENANT_ID', value: subscription().tenantId }
@@ -248,11 +249,12 @@ resource addFicToExistingApp 'Microsoft.Resources/deploymentScripts@2020-10-01' 
     scriptContent: '''
       FIC_NAME="former-elite-${RG_NAME}-uami"
       ADDED=false
-      EXISTING=$(az ad app federated-credential list --id "$APP_ID" --query "[?subject=='${UAMI_PRINCIPAL}'].name" -o tsv 2>/dev/null || echo "")
+      # timeout: a hung Graph call must reach the fail-soft branch, not ARM's 15 min kill.
+      EXISTING=$(timeout 120 az ad app federated-credential list --id "$APP_ID" --query "[?subject=='${UAMI_PRINCIPAL}'].name" -o tsv 2>/dev/null || echo "")
       if [ -n "$EXISTING" ]; then
         echo "FIC already exists for UAMI ${UAMI_PRINCIPAL} on app ${APP_ID}: ${EXISTING}"
         ADDED=true
-      elif az ad app federated-credential create --id "$APP_ID" --parameters "{
+      elif timeout 120 az ad app federated-credential create --id "$APP_ID" --parameters "{
           \"name\": \"${FIC_NAME}\",
           \"issuer\": \"https://login.microsoftonline.com/${TENANT_ID}/v2.0\",
           \"subject\": \"${UAMI_PRINCIPAL}\",
