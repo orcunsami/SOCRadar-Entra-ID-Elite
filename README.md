@@ -160,7 +160,7 @@ Manual entries survive reconciles until removed with `action: remove`.
 Turn it on in the Leaked credentials step. The first check runs as soon as the
 deployment finishes and at every host start while `RunOnStartup` is on, then on the schedule you picked. Findings land in
 `SOCRadar_Botnet_CL`, `SOCRadar_PII_CL` and `SOCRadar_VIP_CL`, with the
-`company_id` each belongs to; run summaries go to `SOCRadar_ImportAudit_CL`.
+`company_id` each belongs to; run summaries go to `SOCRadar_ImportAudit_CL`. In the Microsoft Defender portal the tables are queryable under Investigation & response > Hunting > Advanced hunting.
 
 Rows are appended and never deduplicated. A finding is written once per run
 that reads it, so it is one row only when its window was read once. When a run
