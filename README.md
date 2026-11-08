@@ -162,15 +162,17 @@ deployment finishes and at every host start while `RunOnStartup` is on, then on 
 `SOCRadar_Botnet_CL`, `SOCRadar_PII_CL` and `SOCRadar_VIP_CL`, with the
 `company_id` each belongs to; run summaries go to `SOCRadar_ImportAudit_CL`.
 Set `IncidentMode` through CLI/template parameters; the custom Deploy form does
-not expose it. `IncidentMode=None` (default) keeps the scheduled incident rule disabled;
-`AlertBacked` enables it for matched employee findings across the three tables,
+not expose it. `IncidentMode=None` (default) creates no Sentinel onboarding or incident rule;
+`AlertBacked` adds both for matched employee findings across the three tables,
 with an hourly check and deduplication within its seven-day lookback (roughly
 12–80 minutes from ingestion to alert). `Direct` uses the existing incidents
 API path when `LeakResponse=respond`; deprecated `EnableCreateIncident=true`
 selects Direct only when `IncidentMode=None`.
-The template onboards the workspace to Microsoft Sentinel in every mode so
-returning to None disables the existing rule; Sentinel billing applies while
-the workspace SKU stays `PerGB2018`. Returning from Direct disables API incident
+Only AlertBacked adds Sentinel onboarding; None and Direct create no onboarding or analytics rule, and the workspace SKU stays `PerGB2018`.
+Direct adds a workspace-scoped Sentinel Responder role and requires Sentinel to be onboarded separately.
+Enabling the rule considers the last seven days of found/compromised employee findings, with at most 149 alerts per hour.
+Returning from AlertBacked to None leaves onboarding and the enabled rule in place; remove the rule with `az rest --method delete --url 'https://management.azure.com<rule-resource-id>?api-version=2024-03-01'` and manage existing Sentinel billing separately.
+Returning from Direct disables API incident
 creation but leaves its existing Sentinel Responder role assignment in place;
 remove that assignment from the managed identity's workspace IAM if no longer needed.
 
@@ -305,7 +307,7 @@ Microsoft Sentinel in the Azure portal is supported until 31 March 2027; after t
 | Findings and audit data in KQL | Investigation & response > Hunting > Advanced hunting: `SOCRadar_Botnet_CL`, `SOCRadar_PII_CL`, `SOCRadar_VIP_CL`, `SOCRadar_ImportAudit_CL`, `SOCRadar_EntraID_Audit_CL` |
 | Workspace | Select the workspace at the top right of Advanced hunting, including a secondary workspace |
 
-This product deploys no workbook and raises no incident; incident creation is not offered.
+This product deploys no workbook; on a fresh deployment IncidentMode=None raises no incident, AlertBacked raises alert-backed incidents, and Direct uses the API only when the workspace is already Sentinel-onboarded.
 
 ## State
 

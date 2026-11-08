@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "7109995897160810650"
+      "templateHash": "2240724541445105027"
     }
   },
   "parameters": {
@@ -759,6 +759,7 @@
       }
     },
     "sentinelOnboarding": {
+      "condition": "[equals(variables('effectiveIncidentMode'), 'AlertBacked')]",
       "type": "Microsoft.OperationalInsights/workspaces/providers/onboardingStates",
       "apiVersion": "2024-03-01",
       "name": "[format('{0}/Microsoft.SecurityInsights/default', variables('workspaceName'))]",
@@ -1266,7 +1267,6 @@
         "dcr",
         "hostingPlan",
         "managedIdentity",
-        "sentinelOnboarding",
         "sentinelResponderRole",
         "storageAccount",
         "tableDataRole",
@@ -1335,6 +1335,7 @@
       ]
     },
     "alertRules": {
+      "condition": "[equals(variables('effectiveIncidentMode'), 'AlertBacked')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "elite-alert-rules",

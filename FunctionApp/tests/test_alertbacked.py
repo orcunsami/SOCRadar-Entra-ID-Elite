@@ -29,7 +29,9 @@ class AlertBackedContract(unittest.TestCase):
             self.assertFalse(effective == 'AlertBacked' and effective == 'Direct')
 
     def test_rule_is_stable_and_only_alertbacked_enables_it(self):
-        self.assertNotIn('condition', self.module)
+        condition = "[equals(variables('effectiveIncidentMode'), 'AlertBacked')]"
+        self.assertEqual(self.module['condition'], condition)
+        self.assertEqual(self.resources['sentinelOnboarding']['condition'], condition)
         self.assertEqual(self.module['properties']['parameters']['Enabled']['value'],
                          "[equals(variables('effectiveIncidentMode'), 'AlertBacked')]")
         self.assertEqual(self.props['enabled'], "[parameters('Enabled')]")
@@ -50,8 +52,17 @@ class AlertBackedContract(unittest.TestCase):
         self.assertIn('3e150937-b8fe-4cfb-8069-0eaf05ecd056', role['properties']['roleDefinitionId'])
         self.assertIn('workspace', role['scope'].lower())
         self.assertIn('sentinelResponderRole', self.resources['functionApp']['dependsOn'])
-        self.assertIn('sentinelOnboarding', self.resources['functionApp']['dependsOn'])
+        self.assertNotIn('sentinelOnboarding', self.resources['functionApp']['dependsOn'])
         self.assertEqual(self.resources['workspace']['properties']['sku']['name'], 'PerGB2018')
+
+    def test_none_and_direct_skip_sentinel_resources(self):
+        for mode, legacy in itertools.product(['None', 'Direct', 'AlertBacked'], [False, True]):
+            effective = 'Direct' if mode == 'None' and legacy else mode
+            for name in ['sentinelOnboarding', 'alertRules']:
+                condition = self.resources[name].get('condition', '')
+                match = re.fullmatch(r"\[equals\(variables\('effectiveIncidentMode'\), '([^']+)'\)\]", condition)
+                self.assertIsNotNone(match, name)
+                self.assertEqual(effective == match.group(1), mode == 'AlertBacked')
 
     def test_schedule_and_incident_contract(self):
         self.assertEqual(self.props['queryFrequency'], 'PT1H')
@@ -66,6 +77,8 @@ class AlertBackedContract(unittest.TestCase):
             {'identifier': 'UPNSuffix', 'columnName': 'UPNSuffix'}]})
         for field in ['alertDisplayNameFormat', 'alertDescriptionFormat']:
             self.assertLessEqual(len(re.findall(r'\{\{[^}]+\}\}', self.props['alertDetailsOverride'][field])), 3)
+        self.assertEqual(self.props['alertDetailsOverride']['alertSeverityColumnName'], 'SentinelSeverity')
+        self.assertEqual(self.props['tactics'], ['InitialAccess'])
 
     def test_query_covers_only_finding_tables_and_projects_no_credentials(self):
         q = self.props['query']
@@ -82,6 +95,33 @@ class AlertBackedContract(unittest.TestCase):
         self.assertIn('pack_array(source_name, breach_date, discovery_date)', q)
         self.assertIn('pack_array(keyword, vip_name, source_name, discovery_date)', q)
         self.assertEqual(q.count('iff(alarm_id > 0'), 2)
+        self.assertNotRegex(q, r'(?i)\b(?:first|last)\s*=')
+        self.assertIn("toupper(severity) == 'LOW', 'Low'", q)
+
+    def test_bicep_and_json_feature_structure_match(self):
+        source = (REPO / 'deploy/main.bicep').read_text()
+        symbols = set(re.findall(r'^(?:resource|module)\s+(\w+)\s', source, re.M))
+        self.assertEqual(symbols, set(self.resources))
+        for name in ['sentinelOnboarding', 'alertRules']:
+            match = re.search(r"^(?:resource|module) " + name + r" [^\n]+ = if \((\w+) == '([^']+)'\) \{", source, re.M)
+            self.assertIsNotNone(match, name)
+            variable, value = match.groups()
+            self.assertEqual(self.resources[name]['condition'],
+                             f"[equals(variables('{variable}'), '{value}')]")
+        ci = (REPO / '.github/workflows/ci.yml').read_text()
+        self.assertIn('az bicep install --version', ci)
+        self.assertIn('az bicep build -f main.bicep --outfile /tmp/expected.json', ci)
+        self.assertIn('python3 -m json.tool azuredeploy.json', ci)
+
+    def test_readme_describes_opt_in_and_backfill(self):
+        readme = (REPO / 'README.md').read_text()
+        self.assertNotIn('incident creation is not offered', readme)
+        self.assertNotIn('onboards the workspace to Microsoft Sentinel in every mode', readme)
+        self.assertIn('None raises no incident', readme)
+        self.assertIn('Direct adds a workspace-scoped Sentinel Responder role and requires Sentinel to be onboarded separately.', readme)
+        self.assertIn('last seven days', readme)
+        self.assertIn('at most 149 alerts per hour', readme)
+        self.assertIn('None leaves onboarding and the enabled rule in place', readme)
 
     def test_replay_dedup_is_bounded_to_period_and_prior_alerts(self):
         q = self.props['query']

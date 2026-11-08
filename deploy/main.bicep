@@ -308,7 +308,7 @@ resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   }
 }
 
-resource sentinelOnboarding 'Microsoft.OperationalInsights/workspaces/providers/onboardingStates@2024-03-01' = {
+resource sentinelOnboarding 'Microsoft.OperationalInsights/workspaces/providers/onboardingStates@2024-03-01' = if (effectiveIncidentMode == 'AlertBacked') {
   name: '${workspace.name}/Microsoft.SecurityInsights/default'
   properties: {}
 }
@@ -480,8 +480,8 @@ resource importAuditTable 'Microsoft.OperationalInsights/workspaces/tables@2022-
   properties: { schema: { name: 'SOCRadar_ImportAudit_CL', columns: importAuditColumns } }
 }
 
-// Always deployed: returning to None disables the same rule without deleting it.
-module alertRules './nested_alert_rules.bicep' = {
+// Incremental deployments leave an existing rule in place when this is skipped.
+module alertRules './nested_alert_rules.bicep' = if (effectiveIncidentMode == 'AlertBacked') {
   name: 'elite-alert-rules'
   params: {
     WorkspaceName: workspace.name
@@ -707,7 +707,7 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       ]
     }
   }
-  dependsOn: [tableDataRole, sentinelResponderRole, sentinelOnboarding]
+  dependsOn: [tableDataRole, sentinelResponderRole]
 }
 
 // First run: restart after package mount so the startup sync fires promptly.
