@@ -24,13 +24,13 @@ override and writes whatever it is given, in either mode.
 
 Leave **Client mode** on *Real*. *Mock* is a development option: it writes the
 former list to a local storage table and never contacts the platform, while the
-run still reports what it "added". It is not the trial — the trial switch is
+run still reports what it "added". It is not the trial - the trial switch is
 Apply changes.
 
 ## Deploy
 
 Portal: use `deploy/azuredeploy.json` with `deploy/createUiDefinition.json`
-(custom deployment). The form takes one grid row per company — your own company
+(custom deployment). The form takes one grid row per company - your own company
 in the first row, the other group companies below it: company ID, its own
 tenant GUIDs, its API key and its actor email. Group tenants are derived
 automatically from the other rows.
@@ -40,12 +40,12 @@ platform, such as a holding tenant, goes in **Other group tenants** instead.
 Its active members are suppressed for every company in the grid; it never
 receives a former list itself. The app has to be consented in each tenant
 listed there. Without that the snapshot is incomplete, and an incomplete
-snapshot stops **everything** for that company — no removals and no additions
+snapshot stops **everything** for that company - no removals and no additions
 either, so nobody gets suppressed until the consent is in place.
 
 Creating a new App Registration (the form's default) needs the
 Application Administrator role in Entra ID. Without it the deployment
-fails — pick "Use an existing App Registration" instead and have an app
+fails - pick "Use an existing App Registration" instead and have an app
 owner add the federated credential (the deployment output prints the
 exact command). If that step times out (`DeploymentScriptExceededMaxAllowedTime`),
 redeploy with `SkipFicCreation=true` and add the credential yourself.
@@ -138,7 +138,7 @@ Manual entries survive reconciles until removed with `action: remove`.
   additions included.
 - A data-completeness guard blocks mutation when a tenant read shrinks
   suspiciously. To confirm real shrinkage, set `FORMER_GUARD_ACCEPT_DROP=true`,
-  let one run finish, then **remove the setting again** — nothing clears it for
+  let one run finish, then **remove the setting again** - nothing clears it for
   you, and while it is set that guard never trips.
 - `EnableCrossTenantSuppress` (default on) is a template parameter, not a form field. It makes
   someone still active in one tenant a non-leaver in every other company of the map; turn it off
@@ -160,7 +160,7 @@ Manual entries survive reconciles until removed with `action: remove`.
 Turn it on in the Leaked credentials step. The first check runs as soon as the
 deployment finishes and at every host start while `RunOnStartup` is on, then on the schedule you picked. Findings land in
 `SOCRadar_Botnet_CL`, `SOCRadar_PII_CL` and `SOCRadar_VIP_CL`, with the
-`company_id` each belongs to; run summaries go to `SOCRadar_ImportAudit_CL`. In the Microsoft Defender portal the tables are queryable under Investigation & response > Hunting > Advanced hunting.
+`company_id` each belongs to; run summaries go to `SOCRadar_ImportAudit_CL`.
 
 Rows are appended and never deduplicated. A finding is written once per run
 that reads it, so it is one row only when its window was read once. When a run
@@ -196,7 +196,7 @@ guess, and it sends Microsoft only values shaped like an address. A value that
 is shaped like an address but is not in the directory is `not_found`.
 
 Two more ways a record can leave without being matched, and they mean opposite
-things. `lookup_disabled_count` is your own choice — directory matching is
+things. `lookup_disabled_count` is your own choice - directory matching is
 switched off, so nothing was missed. `no_token_count` is not: no tenant produced
 a Graph token, so those findings were never checked against anybody. A run that
 reports the second one holds its window and reads it again rather than retiring
@@ -210,7 +210,7 @@ Every record a **finished** run handled falls into exactly one of `found_count`,
 `not_found_count`, `domain_filtered`, `no_address_count`,
 `lookup_disabled_count`, `no_token_count` and `lookup_failed_count`, and those
 seven add up to `total_records`. A run that stopped early reports `truncated`
-and legitimately accounts for fewer records than it pulled — the rest are read
+and legitimately accounts for fewer records than it pulled - the rest are read
 again next time. On a finished, error-free run the parts have to close; if they
 do not, the summary is hiding something.
 
@@ -222,7 +222,7 @@ Safety works the same way as the former sync:
   company can never trigger a change in another company's directory.
 - **A ceiling of 50 account changes** (the default) applies **per company per
   source**, so a single scheduled run can change up to 50 × companies × enabled
-  sources accounts — with three companies and two sources that is 300, not 50.
+  sources accounts - with three companies and two sources that is 300, not 50.
   Size it against that number, not against one run. Matches keep being recorded
   once the ceiling is reached. A manual `/api/leak/probe` call acts once, on one
   address, and is not counted against it.
@@ -251,13 +251,13 @@ Safety works the same way as the former sync:
 The last three are not checkboxes on the form. Adding people to a group is
 turned on by filling in **Security group object ID** and nothing else, so a
 deployment that responds at all and names a group is also changing group
-membership — leave the field empty if that is not what you want. Removing from
+membership - leave the field empty if that is not what you want. Removing from
 the group and re-enabling accounts stay off unless `ENABLE_REMOVE_FROM_GROUP`
 or `ENABLE_ENABLE_ACCOUNT` is set in the app's settings.
 
 Confirming a user as compromised needs Entra ID P2. Without that licence
 the response is attempted and recorded as `confirm_risky_failed`. That finding
-is **not** processed again on a later run — the window moves on regardless. So
+is **not** processed again on a later run - the window moves on regardless. So
 grant the licence, or the permission, before turning the response on rather
 than after.
 
@@ -284,13 +284,24 @@ Two actions are deliberately not offered: password validation (ROPC) needs a
 public-client setting this template does not write, and Microsoft Sentinel
 incident creation needs workspace identifiers it does not pass.
 
+## Where to see it in the Microsoft Defender portal
+
+Microsoft Sentinel in the Azure portal is supported until 31 March 2027; after that it is available only in the Microsoft Defender portal.
+
+| What | Defender portal |
+|---|---|
+| Findings and audit data in KQL | Investigation & response > Hunting > Advanced hunting: `SOCRadar_Botnet_CL`, `SOCRadar_PII_CL`, `SOCRadar_VIP_CL`, `SOCRadar_ImportAudit_CL`, `SOCRadar_EntraID_Audit_CL` |
+| Workspace | Select the workspace at the top right of Advanced hunting, including a secondary workspace |
+
+This product deploys no workbook and raises no incident; incident creation is not offered.
+
 ## State
 
 Four storage tables: `EntraIDState` (checkpoint + guard baseline),
 `FormerManual`, `FormerOwnership` (ledger), `LeakActionLedger` (which responses
 have already been applied, so a re-read window does not repeat them). A fifth,
 `FormerLock`, is created on demand as a short-lived lease. Losing state is
-safe — an empty ledger bootstraps with removals forced to zero. Backup and
+safe - an empty ledger bootstraps with removals forced to zero. Backup and
 restore: `deploy/scripts/`.
 
 `LeakActionLedger` rows are dropped once no re-read can reach their window
@@ -314,7 +325,7 @@ on the install.
 
 **2. Ask about one person.** `POST /api/leak/probe` with an address and a
 company ID says where that person was found. It changes nothing unless you send
-`"apply": true`, and then only in an apply-mode deployment. It covers only the two reversible responses — sign-out and password
+`"apply": true`, and then only in an apply-mode deployment. It covers only the two reversible responses - sign-out and password
 change. Disabling an account, resetting MFA and confirming compromise are left
 to the scheduled run, so the probe neither shows nor performs them: an empty
 `would_run` here does not mean the schedule would do nothing.
@@ -377,11 +388,11 @@ SOCRadar_EntraID_Audit_CL
 | project TimeGenerated, company_id, added, removed, blocked, block_reason
 ```
 
-A run that found nothing looks the same as a healthy one — except that on a
+A run that found nothing looks the same as a healthy one - except that on a
 healthy run `error_count`, `lookup_failed_count` and `truncated` are all zero.
 If any of them is set, the window was not fully read and will be tried again.
 `capped` also holds the window now: the run reached its ceiling, matches were
-recorded, and the re-read gives the remaining accounts their turn — the ledger
+recorded, and the re-read gives the remaining accounts their turn - the ledger
 skips everyone already acted on, so nothing is done twice. A feed that outruns
 the ceiling every single run is bounded the same way as any other hold: after a
 few attempts the window is abandoned with an `import_window_abandoned` event.
@@ -426,7 +437,7 @@ requested only for the responses you turn on, so a tenant admin is never asked
 to consent to something the deployment will not do. The automatic-consent
 checkbox covers the read permissions only; permission to change accounts is
 always granted by a person on the consent screen. Turning a response off later
-stops the app using it, but does not revoke a consent already given — remove it
+stops the app using it, but does not revoke a consent already given - remove it
 under App registrations > API permissions.
 
 ## Keys and secrets
@@ -443,7 +454,7 @@ Restrict who has that access, or deploy with an empty key and use an `api_key_se
 
 One setting is deliberately left off and should stay that way:
 
-- `ENABLE_ROPC` — attempts a real sign-in with the leaked password, which shows
+- `ENABLE_ROPC` - attempts a real sign-in with the leaked password, which shows
   up in your tenant's sign-in logs and can trigger lockouts.
 
 The leaked credential is recorded exactly as SOCRadar delivered it. Whether it
@@ -462,7 +473,7 @@ dashboard can show something safe without reading the credential itself.
 | A company row shows an API-key error | Key empty or wrong for that company | Add the correct key (or an api_key_setting reference) |
 | Manual add returns 409 | A sync is writing that company right now | Retry in a minute |
 | Adds report success but the platform list stays empty | Client mode is Mock, or the actor email does not belong to that company | Set Client mode to Real; verify the actor email; if both are right, contact support |
-| Nobody is suppressed and `blocked` says `incomplete_snapshot` | A listed tenant has not consented to the app | Consent it there — until then that company gets no additions either |
+| Nobody is suppressed and `blocked` says `incomplete_snapshot` | A listed tenant has not consented to the app | Consent it there - until then that company gets no additions either |
 
 ## Postman
 
