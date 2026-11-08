@@ -161,6 +161,18 @@ Turn it on in the Leaked credentials step. The first check runs as soon as the
 deployment finishes and at every host start while `RunOnStartup` is on, then on the schedule you picked. Findings land in
 `SOCRadar_Botnet_CL`, `SOCRadar_PII_CL` and `SOCRadar_VIP_CL`, with the
 `company_id` each belongs to; run summaries go to `SOCRadar_ImportAudit_CL`.
+Set `IncidentMode` through CLI/template parameters; the custom Deploy form does
+not expose it. `IncidentMode=None` (default) keeps the scheduled incident rule disabled;
+`AlertBacked` enables it for matched employee findings across the three tables,
+with an hourly check and deduplication within its seven-day lookback (roughly
+12–80 minutes from ingestion to alert). `Direct` uses the existing incidents
+API path when `LeakResponse=respond`; deprecated `EnableCreateIncident=true`
+selects Direct only when `IncidentMode=None`.
+The template onboards the workspace to Microsoft Sentinel in every mode so
+returning to None disables the existing rule; Sentinel billing applies while
+the workspace SKU stays `PerGB2018`. Returning from Direct disables API incident
+creation but leaves its existing Sentinel Responder role assignment in place;
+remove that assignment from the managed identity's workspace IAM if no longer needed.
 
 Rows are appended and never deduplicated. A finding is written once per run
 that reads it, so it is one row only when its window was read once. When a run
@@ -280,9 +292,9 @@ for it, so it is retried only if the window is read again for another reason.
 Because MFA reset cannot be undone, start with Log only and confirm the matches
 look right before turning responses on.
 
-Two actions are deliberately not offered: password validation (ROPC) needs a
-public-client setting this template does not write, and Microsoft Sentinel
-incident creation needs workspace identifiers it does not pass.
+Password validation (ROPC) is not offered: it needs a public-client setting
+this template does not write. Incident mode is set through the template's
+`IncidentMode` parameter; Direct API incidents are not synchronized to Defender.
 
 ## Where to see it in the Microsoft Defender portal
 

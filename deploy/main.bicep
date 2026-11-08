@@ -74,6 +74,13 @@ param FormerMaxRemovalPercent int = 50
 @description('Also monitor leaked credentials. Each company row is checked against its own tenants only.')
 param EnableLeakMonitoring bool = false
 
+@description('None (default) creates no incidents. AlertBacked enables a scheduled rule over matched employee findings. Direct uses the existing incidents API path, which requires LeakResponse=respond and is not synchronized to the Defender portal.')
+@allowed(['None', 'AlertBacked', 'Direct'])
+param IncidentMode string = 'None'
+
+@description('Deprecated: true selects Direct only when IncidentMode is None. An explicit AlertBacked or Direct takes precedence.')
+param EnableCreateIncident bool = false
+
 @description('Leak sources to pull from the platform.')
 @allowed(['botnet', 'pii', 'vip'])
 param LeakSources array = ['botnet', 'pii']
@@ -125,6 +132,7 @@ var managedIdentityName = 'Elite-Former-MI'
 var hostingPlanName = 'Elite-Former-Plan'
 var workspaceName = 'Elite-Former-LAW-${suffix}'
 var dcrName = 'Elite-Former-DCR'
+var effectiveIncidentMode = (IncidentMode == 'None' && EnableCreateIncident) ? 'Direct' : IncidentMode
 var socradarBaseUrl = Environment == 'preprod' ? 'https://preprod.socradar.com' : 'https://platform.socradar.com'
 // NCRONTAB minute field is 0-59: intervals >= 60 must move to the hour field
 // (the base entra-id template's proven pattern) or they silently fire hourly.
@@ -300,6 +308,21 @@ resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   }
 }
 
+resource sentinelOnboarding 'Microsoft.OperationalInsights/workspaces/providers/onboardingStates@2024-03-01' = {
+  name: '${workspace.name}/Microsoft.SecurityInsights/default'
+  properties: {}
+}
+
+resource sentinelResponderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (effectiveIncidentMode == 'Direct') {
+  name: guid(workspace.id, managedIdentity.id, 'SentinelResponder')
+  scope: workspace
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3e150937-b8fe-4cfb-8069-0eaf05ecd056')
+    principalId: managedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 var auditColumns = [
   { name: 'TimeGenerated', type: 'datetime' }
   { name: 'source', type: 'string' }
@@ -455,6 +478,16 @@ resource importAuditTable 'Microsoft.OperationalInsights/workspaces/tables@2022-
   parent: workspace
   name: 'SOCRadar_ImportAudit_CL'
   properties: { schema: { name: 'SOCRadar_ImportAudit_CL', columns: importAuditColumns } }
+}
+
+// Always deployed: returning to None disables the same rule without deleting it.
+module alertRules './nested_alert_rules.bicep' = {
+  name: 'elite-alert-rules'
+  params: {
+    WorkspaceName: workspace.name
+    Enabled: effectiveIncidentMode == 'AlertBacked'
+  }
+  dependsOn: [sentinelOnboarding, botnetTable, piiTable, vipTable]
 }
 
 resource dcr 'Microsoft.Insights/dataCollectionRules@2023-03-11' = {
@@ -642,10 +675,12 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'ENABLE_ADD_TO_GROUP', value: string(respondOn && !empty(SecurityGroupId)) }
         { name: 'ENABLE_REMOVE_FROM_GROUP', value: 'false' }
         { name: 'ENABLE_ENABLE_ACCOUNT', value: 'false' }
-        // Not offered: ROPC needs a public-client setting this template does not
-        // write, and incident creation needs workspace ids it does not pass.
+        // ROPC needs a public-client setting this template does not write.
         { name: 'ENABLE_ROPC', value: 'false' }
-        { name: 'ENABLE_CREATE_INCIDENT', value: 'false' }
+        { name: 'ENABLE_CREATE_INCIDENT', value: string(effectiveIncidentMode == 'Direct') }
+        { name: 'SUBSCRIPTION_ID', value: subscription().subscriptionId }
+        { name: 'WORKSPACE_NAME', value: workspace.name }
+        { name: 'WORKSPACE_RESOURCE_GROUP', value: resourceGroup().name }
         { name: 'ENABLE_RESOLVE_ALARM', value: 'false' }
         { name: 'SECURITY_GROUP_ID', value: SecurityGroupId }
         // Addresses outside these domains are dropped before any lookup, so a
@@ -672,7 +707,7 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       ]
     }
   }
-  dependsOn: [tableDataRole]
+  dependsOn: [tableDataRole, sentinelResponderRole, sentinelOnboarding]
 }
 
 // First run: restart after package mount so the startup sync fires promptly.

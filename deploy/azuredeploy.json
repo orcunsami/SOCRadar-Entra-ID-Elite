@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "15346405261425248284"
+      "templateHash": "7109995897160810650"
     }
   },
   "parameters": {
@@ -165,6 +165,25 @@
         "description": "Also monitor leaked credentials. Each company row is checked against its own tenants only."
       }
     },
+    "IncidentMode": {
+      "type": "string",
+      "defaultValue": "None",
+      "allowedValues": [
+        "None",
+        "AlertBacked",
+        "Direct"
+      ],
+      "metadata": {
+        "description": "None (default) creates no incidents. AlertBacked enables a scheduled rule over matched employee findings. Direct uses the existing incidents API path, which requires LeakResponse=respond and is not synchronized to the Defender portal."
+      }
+    },
+    "EnableCreateIncident": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Deprecated: true selects Direct only when IncidentMode is None. An explicit AlertBacked or Direct takes precedence."
+      }
+    },
     "LeakSources": {
       "type": "array",
       "defaultValue": [
@@ -289,6 +308,7 @@
     "hostingPlanName": "Elite-Former-Plan",
     "workspaceName": "[format('Elite-Former-LAW-{0}', variables('suffix'))]",
     "dcrName": "Elite-Former-DCR",
+    "effectiveIncidentMode": "[if(and(equals(parameters('IncidentMode'), 'None'), parameters('EnableCreateIncident')), 'Direct', parameters('IncidentMode'))]",
     "socradarBaseUrl": "[if(equals(parameters('Environment'), 'preprod'), 'https://preprod.socradar.com', 'https://platform.socradar.com')]",
     "formerSchedule": "[if(less(parameters('FormerSyncIntervalMinutes'), 60), format('0 */{0} * * * *', parameters('FormerSyncIntervalMinutes')), format('0 0 */{0} * * *', div(parameters('FormerSyncIntervalMinutes'), 60)))]",
     "graphUniqueAppName": "[format('entra-former-{0}', variables('suffix'))]",
@@ -738,6 +758,31 @@
         "retentionInDays": 90
       }
     },
+    "sentinelOnboarding": {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/onboardingStates",
+      "apiVersion": "2024-03-01",
+      "name": "[format('{0}/Microsoft.SecurityInsights/default', variables('workspaceName'))]",
+      "properties": {},
+      "dependsOn": [
+        "workspace"
+      ]
+    },
+    "sentinelResponderRole": {
+      "condition": "[equals(variables('effectiveIncidentMode'), 'Direct')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]",
+      "name": "[guid(resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), 'SentinelResponder')]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3e150937-b8fe-4cfb-8069-0eaf05ecd056')]",
+        "principalId": "[reference('managedIdentity').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "managedIdentity",
+        "workspace"
+      ]
+    },
     "auditTable": {
       "type": "Microsoft.OperationalInsights/workspaces/tables",
       "apiVersion": "2022-10-01",
@@ -1154,7 +1199,19 @@
             },
             {
               "name": "ENABLE_CREATE_INCIDENT",
-              "value": "false"
+              "value": "[string(equals(variables('effectiveIncidentMode'), 'Direct'))]"
+            },
+            {
+              "name": "SUBSCRIPTION_ID",
+              "value": "[subscription().subscriptionId]"
+            },
+            {
+              "name": "WORKSPACE_NAME",
+              "value": "[variables('workspaceName')]"
+            },
+            {
+              "name": "WORKSPACE_RESOURCE_GROUP",
+              "value": "[resourceGroup().name]"
             },
             {
               "name": "ENABLE_RESOLVE_ALARM",
@@ -1209,6 +1266,8 @@
         "dcr",
         "hostingPlan",
         "managedIdentity",
+        "sentinelOnboarding",
+        "sentinelResponderRole",
         "storageAccount",
         "tableDataRole",
         "workspace"
@@ -1273,6 +1332,119 @@
       "dependsOn": [
         "functionApp",
         "managedIdentity"
+      ]
+    },
+    "alertRules": {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "elite-alert-rules",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "WorkspaceName": {
+            "value": "[variables('workspaceName')]"
+          },
+          "Enabled": {
+            "value": "[equals(variables('effectiveIncidentMode'), 'AlertBacked')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "9839276995587257929"
+            }
+          },
+          "parameters": {
+            "WorkspaceName": {
+              "type": "string"
+            },
+            "Enabled": {
+              "type": "bool"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+              "apiVersion": "2024-03-01",
+              "name": "[format('{0}/Microsoft.SecurityInsights/{1}', parameters('WorkspaceName'), guid(parameters('WorkspaceName'), 'elite-leaked-credential-rule'))]",
+              "kind": "Scheduled",
+              "properties": {
+                "displayName": "SOCRadar Elite - Leaked employee credential",
+                "description": "Identifies a leaked credential matched to an employee account. Review sign-in activity, revoke sessions and reset the credential as appropriate.",
+                "severity": "High",
+                "enabled": "[parameters('Enabled')]",
+                "queryFrequency": "PT1H",
+                "queryPeriod": "P7D",
+                "triggerOperator": "GreaterThan",
+                "triggerThreshold": 0,
+                "suppressionDuration": "PT1H",
+                "suppressionEnabled": false,
+                "tactics": [
+                  "InitialAccess"
+                ],
+                "techniques": [
+                  "T1078"
+                ],
+                "eventGroupingSettings": {
+                  "aggregationKind": "AlertPerResult"
+                },
+                "alertDetailsOverride": {
+                  "alertDisplayNameFormat": "SOCRadar Elite: Leaked credential ({{SourceName}})",
+                  "alertDescriptionFormat": "Leaked employee credential for {{AccountDisplay}} in company {{CompanyId}}. Source: {{SourceName}}. Review sign-ins and reset the credential.",
+                  "alertSeverityColumnName": "SentinelSeverity"
+                },
+                "customDetails": {
+                  "EliteDedupKey": "DedupKey",
+                  "CompanyId": "CompanyId",
+                  "Source": "SourceName",
+                  "EntraStatus": "EntraStatus"
+                },
+                "entityMappings": [
+                  {
+                    "entityType": "Account",
+                    "fieldMappings": [
+                      {
+                        "identifier": "Name",
+                        "columnName": "AccountName"
+                      },
+                      {
+                        "identifier": "UPNSuffix",
+                        "columnName": "UPNSuffix"
+                      }
+                    ]
+                  }
+                ],
+                "incidentConfiguration": {
+                  "createIncident": true,
+                  "groupingConfiguration": {
+                    "enabled": false,
+                    "reopenClosedIncident": false,
+                    "lookbackDuration": "PT5H",
+                    "matchingMethod": "AllEntities",
+                    "groupByEntities": [],
+                    "groupByAlertDetails": [],
+                    "groupByCustomDetails": []
+                  }
+                },
+                "query": "// The engine bounds all reads to queryPeriod: dedup lasts seven days, not forever.\n// Hold fresh rows twelve minutes so the preceding run's alerts can be ingested.\nlet Alerted = union isfuzzy=true (datatable(TimeGenerated:datetime, ExtendedProperties:string)[]), SecurityAlert\n| where TimeGenerated > ago(7d)\n| extend AlertedKey = tostring(parse_json(tostring(parse_json(ExtendedProperties)['Custom Details'])).EliteDedupKey[0])\n| where isnotempty(AlertedKey)\n| distinct AlertedKey;\nunion\n  (SOCRadar_Botnet_CL\n   | project TimeGenerated, IngestedAt=ingestion_time(), company_id, email, is_employee, source, severity, entra_status,\n       FindingId=tostring(pack_array(url, log_date, device_ip))),\n  (SOCRadar_PII_CL\n   | project TimeGenerated, IngestedAt=ingestion_time(), company_id, email, is_employee, source, severity, entra_status,\n       FindingId=iff(alarm_id > 0, tostring(alarm_id), tostring(pack_array(source_name, breach_date, discovery_date)))),\n  (SOCRadar_VIP_CL\n   | project TimeGenerated, IngestedAt=ingestion_time(), company_id, email, is_employee, source, severity, entra_status,\n       FindingId=iff(alarm_id > 0, tostring(alarm_id), tostring(pack_array(keyword, vip_name, source_name, discovery_date))))\n| where IngestedAt > ago(7d) and IngestedAt < ago(12m)\n| where is_employee == true and isnotempty(email) and isnotempty(company_id)\n| where tolower(entra_status) in ('found', 'compromised')\n| where email matches regex @\"^[^@\\s]+@[^@\\s]+$\"\n| extend DedupKey = hash_sha256(tostring(pack_array(company_id, source, tolower(email), FindingId)))\n| join kind=leftanti Alerted on $left.DedupKey == $right.AlertedKey\n| summarize arg_max(TimeGenerated, *) by DedupKey\n| extend AccountName=tostring(split(email, '@')[0]), UPNSuffix=tostring(split(email, '@')[1])\n| extend AccountDisplay=email, CompanyId=company_id, SourceName=toupper(source), EntraStatus=entra_status\n| extend SentinelSeverity=case(toupper(severity) in ('CRITICAL', 'HIGH'), 'High', toupper(severity) == 'LOW', 'Low', 'Medium')\n| project TimeGenerated, DedupKey, AccountName, UPNSuffix, AccountDisplay, CompanyId, SourceName, EntraStatus, SentinelSeverity\n| order by TimeGenerated asc\n| take 149\n"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "botnetTable",
+        "piiTable",
+        "sentinelOnboarding",
+        "vipTable",
+        "workspace"
       ]
     }
   },
